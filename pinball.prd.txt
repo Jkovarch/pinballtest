@@ -1,0 +1,1 @@
+Lets make a basic pinball game in javascript that can be played with a keyboard in a browser or with touch control on a mobile phone, add realistic ball physics 2 flippers in a standard layout, drop targets, ramp with spinner, pop bumpers and a scoreboard. add settings a settings page where we can play with the physics a little to dial in the desired speed and bounce of the ball.
