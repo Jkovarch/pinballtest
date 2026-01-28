@@ -4,15 +4,61 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Responsive canvas sizing - taller aspect ratio like real pinball (1:2)
+// Responsive canvas sizing - fits within available space
 function resizeCanvas() {
-    const maxWidth = Math.min(400, window.innerWidth - 20);
-    const aspectRatio = 2.0; // Taller like real pinball table
-    canvas.width = maxWidth;
-    canvas.height = maxWidth * aspectRatio;
+    const container = document.querySelector('.canvas-container');
+    const containerRect = container.getBoundingClientRect();
+
+    // Get available space
+    const availableWidth = containerRect.width - 10;
+    const availableHeight = containerRect.height - 10;
+
+    // Target aspect ratio (width:height = 1:2 for pinball)
+    const aspectRatio = 2.0;
+
+    // Calculate dimensions to fit in container while maintaining aspect ratio
+    let canvasWidth, canvasHeight;
+
+    if (availableHeight / availableWidth > aspectRatio) {
+        // Container is taller than needed - fit to width
+        canvasWidth = Math.min(availableWidth, 400);
+        canvasHeight = canvasWidth * aspectRatio;
+    } else {
+        // Container is wider than needed - fit to height
+        canvasHeight = availableHeight;
+        canvasWidth = canvasHeight / aspectRatio;
+    }
+
+    // Ensure minimum size
+    canvasWidth = Math.max(canvasWidth, 200);
+    canvasHeight = Math.max(canvasHeight, 400);
+
+    // Set canvas size
+    canvas.width = Math.floor(canvasWidth);
+    canvas.height = Math.floor(canvasHeight);
+
+    // Reinitialize game elements for new size
+    if (typeof initializeGameElements === 'function') {
+        initializeGameElements();
+    }
 }
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
+
+// Initial resize after DOM is ready
+function initCanvas() {
+    resizeCanvas();
+}
+
+// Handle resize with debounce
+let resizeTimeout;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(resizeCanvas, 100);
+});
+
+// Also handle orientation change on mobile
+window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 200);
+});
 
 // Physics settings (adjustable via settings panel)
 const physics = {
@@ -1098,11 +1144,20 @@ function drawBall() {
 function drawLaunchIndicator(w, h) {
     const playableWidth = w - plunger.width;
 
-    ctx.fillStyle = 'rgba(78, 205, 196, 0.7)';
-    ctx.font = 'bold 12px Arial';
+    ctx.fillStyle = 'rgba(78, 205, 196, 0.9)';
+    ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('Press SPACE', playableWidth / 2, h / 2 - 10);
-    ctx.fillText('to launch!', playableWidth / 2, h / 2 + 10);
+
+    // Check if touch device
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+    if (isTouchDevice) {
+        ctx.fillText('Tap GO!', playableWidth / 2, h / 2 - 10);
+        ctx.fillText('to launch', playableWidth / 2, h / 2 + 10);
+    } else {
+        ctx.fillText('Press SPACE', playableWidth / 2, h / 2 - 10);
+        ctx.fillText('to launch!', playableWidth / 2, h / 2 + 10);
+    }
 
     // Blinking ball in plunger lane
     const blink = Math.sin(Date.now() / 200) > 0;
@@ -1143,44 +1198,73 @@ document.addEventListener('keyup', (e) => {
     }
 });
 
-// Touch controls
+// Touch controls with improved mobile handling
 const touchLeft = document.getElementById('touchLeft');
 const touchRight = document.getElementById('touchRight');
 const touchLaunch = document.getElementById('touchLaunch');
 
-touchLeft.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    flippers.left.active = true;
-});
-touchLeft.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    flippers.left.active = false;
-});
+// Helper function to handle touch events properly
+function setupTouchButton(button, onStart, onEnd) {
+    // Touch events
+    button.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        button.classList.add('pressed');
+        onStart();
+    }, { passive: false });
 
-touchRight.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    flippers.right.active = true;
-});
-touchRight.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    flippers.right.active = false;
-});
+    button.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        button.classList.remove('pressed');
+        if (onEnd) onEnd();
+    }, { passive: false });
 
-touchLaunch.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    launchBall();
-});
+    button.addEventListener('touchcancel', (e) => {
+        e.preventDefault();
+        button.classList.remove('pressed');
+        if (onEnd) onEnd();
+    }, { passive: false });
 
-// Mouse fallback for touch buttons
-touchLeft.addEventListener('mousedown', () => flippers.left.active = true);
-touchLeft.addEventListener('mouseup', () => flippers.left.active = false);
-touchLeft.addEventListener('mouseleave', () => flippers.left.active = false);
+    // Mouse events for desktop testing
+    button.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        button.classList.add('pressed');
+        onStart();
+    });
 
-touchRight.addEventListener('mousedown', () => flippers.right.active = true);
-touchRight.addEventListener('mouseup', () => flippers.right.active = false);
-touchRight.addEventListener('mouseleave', () => flippers.right.active = false);
+    button.addEventListener('mouseup', (e) => {
+        e.preventDefault();
+        button.classList.remove('pressed');
+        if (onEnd) onEnd();
+    });
 
-touchLaunch.addEventListener('click', launchBall);
+    button.addEventListener('mouseleave', () => {
+        button.classList.remove('pressed');
+        if (onEnd) onEnd();
+    });
+}
+
+// Setup flipper controls
+setupTouchButton(touchLeft,
+    () => { flippers.left.active = true; },
+    () => { flippers.left.active = false; }
+);
+
+setupTouchButton(touchRight,
+    () => { flippers.right.active = true; },
+    () => { flippers.right.active = false; }
+);
+
+// Launch button - only needs start action
+setupTouchButton(touchLaunch,
+    () => { launchBall(); },
+    null
+);
+
+// Prevent default touch behaviors on canvas
+canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
 // Button controls
 document.getElementById('launchBtn').addEventListener('click', launchBall);
@@ -1194,6 +1278,14 @@ const resetSettings = document.getElementById('resetSettings');
 settingsBtn.addEventListener('click', () => {
     settingsModal.classList.add('active');
 });
+
+// Mobile settings button
+const mobileSettingsBtn = document.getElementById('mobileSettingsBtn');
+if (mobileSettingsBtn) {
+    mobileSettingsBtn.addEventListener('click', () => {
+        settingsModal.classList.add('active');
+    });
+}
 
 closeSettings.addEventListener('click', () => {
     settingsModal.classList.remove('active');
@@ -1272,12 +1364,6 @@ sliders.friction.addEventListener('input', (e) => {
 // Initialize settings UI
 updateSettingsUI();
 
-// Handle canvas resize
-window.addEventListener('resize', () => {
-    resizeCanvas();
-    initializeGameElements();
-});
-
 // Game loop
 function gameLoop() {
     updateBall();
@@ -1287,10 +1373,22 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
-// Initialize and start
-initializeGameElements();
-document.getElementById('highScore').textContent = gameState.highScore;
-gameLoop();
+// Initialize and start the game
+function startGame() {
+    // Wait for DOM to be fully ready
+    resizeCanvas();
+    initializeGameElements();
+    document.getElementById('highScore').textContent = gameState.highScore;
+    gameLoop();
+}
+
+// Start when document is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startGame);
+} else {
+    // Small delay to ensure layout is complete
+    setTimeout(startGame, 50);
+}
 
 // Close modal when clicking outside
 settingsModal.addEventListener('click', (e) => {
@@ -1298,3 +1396,13 @@ settingsModal.addEventListener('click', (e) => {
         settingsModal.classList.remove('active');
     }
 });
+
+// Prevent zoom on double tap for iOS
+document.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    if (now - lastTouchEnd <= 300) {
+        e.preventDefault();
+    }
+    lastTouchEnd = now;
+}, { passive: false });
+let lastTouchEnd = 0;
