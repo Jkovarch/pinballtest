@@ -4,10 +4,10 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Responsive canvas sizing
+// Responsive canvas sizing - taller aspect ratio like real pinball (1:2)
 function resizeCanvas() {
-    const maxWidth = Math.min(500, window.innerWidth - 20);
-    const aspectRatio = 1.6;
+    const maxWidth = Math.min(400, window.innerWidth - 20);
+    const aspectRatio = 2.0; // Taller like real pinball table
     canvas.width = maxWidth;
     canvas.height = maxWidth * aspectRatio;
 }
@@ -16,12 +16,14 @@ window.addEventListener('resize', resizeCanvas);
 
 // Physics settings (adjustable via settings panel)
 const physics = {
-    gravity: 0.35,
-    bounce: 0.6,
-    flipperPower: 18,
+    gravity: 0.25,
+    bounce: 0.65,
+    flipperPower: 22,
     speedMultiplier: 1.0,
-    bumperForce: 12,
-    friction: 0.985
+    bumperForce: 14,
+    friction: 0.992,
+    slingForce: 15,
+    slingThreshold: 4 // Minimum velocity to trigger slingshot bounce
 };
 
 // Default physics for reset
@@ -42,156 +44,207 @@ const ball = {
     y: 0,
     vx: 0,
     vy: 0,
-    radius: 10,
+    radius: 8,
     active: false
 };
 
 // Plunger for launching
 const plunger = {
-    x: canvas.width - 25,
+    x: 0,
+    width: 30,
     power: 0,
-    maxPower: 25,
+    maxPower: 35,
     charging: false
 };
 
-// Flippers
+// Flippers - will be positioned in initializeGameElements
 const flippers = {
     left: {
-        x: canvas.width * 0.25,
-        y: canvas.height - 80,
-        length: 60,
-        angle: 0.4,
-        targetAngle: 0.4,
-        maxAngle: -0.6,
-        speed: 0.35,
+        x: 0,
+        y: 0,
+        length: 55,
+        angle: 0.5,
+        targetAngle: 0.5,
+        maxAngle: -0.7,
+        speed: 0.4,
         active: false
     },
     right: {
-        x: canvas.width * 0.75,
-        y: canvas.height - 80,
-        length: 60,
-        angle: Math.PI - 0.4,
-        targetAngle: Math.PI - 0.4,
-        maxAngle: Math.PI + 0.6,
-        speed: 0.35,
+        x: 0,
+        y: 0,
+        length: 55,
+        angle: Math.PI - 0.5,
+        targetAngle: Math.PI - 0.5,
+        maxAngle: Math.PI + 0.7,
+        speed: 0.4,
         active: false
+    }
+};
+
+// Slingshots - triangular shapes above flippers
+const slingshots = {
+    left: {
+        points: [], // Will be set in initializeGameElements
+        active: false,
+        timer: 0
+    },
+    right: {
+        points: [],
+        active: false,
+        timer: 0
     }
 };
 
 // Pop bumpers
 const bumpers = [
-    { x: canvas.width * 0.3, y: canvas.height * 0.25, radius: 25, hits: 0, active: false, timer: 0 },
-    { x: canvas.width * 0.7, y: canvas.height * 0.25, radius: 25, hits: 0, active: false, timer: 0 },
-    { x: canvas.width * 0.5, y: canvas.height * 0.35, radius: 25, hits: 0, active: false, timer: 0 }
+    { x: 0, y: 0, radius: 20, hits: 0, active: false, timer: 0 },
+    { x: 0, y: 0, radius: 20, hits: 0, active: false, timer: 0 },
+    { x: 0, y: 0, radius: 18, hits: 0, active: false, timer: 0 }
 ];
 
-// Drop targets
-const dropTargets = [
-    { x: canvas.width * 0.15, y: canvas.height * 0.45, width: 8, height: 30, active: true },
-    { x: canvas.width * 0.15, y: canvas.height * 0.50, width: 8, height: 30, active: true },
-    { x: canvas.width * 0.15, y: canvas.height * 0.55, width: 8, height: 30, active: true },
-    { x: canvas.width * 0.85, y: canvas.height * 0.45, width: 8, height: 30, active: true },
-    { x: canvas.width * 0.85, y: canvas.height * 0.50, width: 8, height: 30, active: true },
-    { x: canvas.width * 0.85, y: canvas.height * 0.55, width: 8, height: 30, active: true }
-];
+// Drop targets - bank of 5 across the top area
+const dropTargets = [];
 
 // Ramp
 const ramp = {
-    x1: canvas.width * 0.35,
-    y1: canvas.height * 0.55,
-    x2: canvas.width * 0.25,
-    y2: canvas.height * 0.15,
-    width: 30,
-    entryY: canvas.height * 0.55
+    x1: 0, y1: 0, x2: 0, y2: 0, width: 25
 };
 
 // Spinner
 const spinner = {
-    x: canvas.width * 0.5,
-    y: canvas.height * 0.15,
-    width: 40,
-    height: 6,
-    angle: 0,
-    spinSpeed: 0,
-    friction: 0.98
+    x: 0, y: 0, width: 35, height: 5,
+    angle: 0, spinSpeed: 0, friction: 0.98
 };
 
-// Walls and obstacles
+// Lane guides and walls
 const walls = [];
-
-function initializeWalls() {
-    walls.length = 0;
-    const w = canvas.width;
-    const h = canvas.height;
-
-    // Main boundary walls
-    walls.push({ x1: 0, y1: 0, x2: 0, y2: h }); // Left
-    walls.push({ x1: w, y1: 0, x2: w, y2: h }); // Right
-    walls.push({ x1: 0, y1: 0, x2: w, y2: 0 }); // Top
-
-    // Side rails (angled)
-    walls.push({ x1: 0, y1: h * 0.7, x2: w * 0.15, y2: h - 80 }); // Left rail
-    walls.push({ x1: w, y1: h * 0.7, x2: w * 0.85, y2: h - 80 }); // Right rail
-
-    // Plunger lane
-    walls.push({ x1: w - 40, y1: h * 0.1, x2: w - 40, y2: h - 20 }); // Plunger lane left wall
-    walls.push({ x1: w - 40, y1: h * 0.1, x2: w - 20, y2: h * 0.05 }); // Plunger lane curve
-
-    // Out lanes
-    walls.push({ x1: w * 0.08, y1: h - 80, x2: w * 0.08, y2: h - 20 }); // Left out lane
-    walls.push({ x1: w * 0.92, y1: h - 80, x2: w * 0.92, y2: h - 20 }); // Right out lane
-}
+const laneGuides = [];
 
 // Initialize game elements based on canvas size
 function initializeGameElements() {
-    initializeWalls();
+    const w = canvas.width;
+    const h = canvas.height;
 
-    // Update flipper positions
-    flippers.left.x = canvas.width * 0.25;
-    flippers.left.y = canvas.height - 80;
-    flippers.right.x = canvas.width * 0.75;
-    flippers.right.y = canvas.height - 80;
+    // Plunger lane dimensions
+    const plungerLaneWidth = 35;
+    const playableWidth = w - plungerLaneWidth;
 
-    // Update bumper positions
-    bumpers[0].x = canvas.width * 0.3;
-    bumpers[0].y = canvas.height * 0.25;
-    bumpers[1].x = canvas.width * 0.7;
-    bumpers[1].y = canvas.height * 0.25;
-    bumpers[2].x = canvas.width * 0.5;
-    bumpers[2].y = canvas.height * 0.35;
+    plunger.x = w - plungerLaneWidth / 2;
+    plunger.width = plungerLaneWidth;
 
-    // Update drop target positions
-    dropTargets[0].x = canvas.width * 0.15;
-    dropTargets[0].y = canvas.height * 0.45;
-    dropTargets[1].x = canvas.width * 0.15;
-    dropTargets[1].y = canvas.height * 0.50;
-    dropTargets[2].x = canvas.width * 0.15;
-    dropTargets[2].y = canvas.height * 0.55;
-    dropTargets[3].x = canvas.width * 0.85;
-    dropTargets[3].y = canvas.height * 0.45;
-    dropTargets[4].x = canvas.width * 0.85;
-    dropTargets[4].y = canvas.height * 0.50;
-    dropTargets[5].x = canvas.width * 0.85;
-    dropTargets[5].y = canvas.height * 0.55;
+    // Flipper positions - centered in playable area, close together
+    const flipperY = h - 65;
+    const flipperGap = 50; // Gap between flipper pivots
+    const flipperCenterX = playableWidth / 2;
 
-    // Update ramp
-    ramp.x1 = canvas.width * 0.35;
-    ramp.y1 = canvas.height * 0.55;
-    ramp.x2 = canvas.width * 0.25;
-    ramp.y2 = canvas.height * 0.15;
-    ramp.entryY = canvas.height * 0.55;
+    flippers.left.x = flipperCenterX - flipperGap / 2;
+    flippers.left.y = flipperY;
+    flippers.right.x = flipperCenterX + flipperGap / 2;
+    flippers.right.y = flipperY;
 
-    // Update spinner
-    spinner.x = canvas.width * 0.5;
-    spinner.y = canvas.height * 0.15;
+    // Slingshot positions - triangular areas above and outside each flipper
+    // Left slingshot
+    const slingshotHeight = 70;
+    const slingshotWidth = 45;
+    slingshots.left.points = [
+        { x: 25, y: flipperY - 10 },                           // Bottom (near wall)
+        { x: 25, y: flipperY - slingshotHeight },              // Top (near wall)
+        { x: 25 + slingshotWidth, y: flipperY - 10 }           // Bottom inner (near flipper)
+    ];
 
-    // Update plunger
-    plunger.x = canvas.width - 25;
+    // Right slingshot
+    slingshots.right.points = [
+        { x: playableWidth - 25, y: flipperY - 10 },                        // Bottom (near wall)
+        { x: playableWidth - 25, y: flipperY - slingshotHeight },           // Top (near wall)
+        { x: playableWidth - 25 - slingshotWidth, y: flipperY - 10 }        // Bottom inner (near flipper)
+    ];
+
+    // Pop bumpers - cluster in upper middle area
+    bumpers[0].x = playableWidth * 0.35;
+    bumpers[0].y = h * 0.18;
+    bumpers[0].radius = 22;
+
+    bumpers[1].x = playableWidth * 0.65;
+    bumpers[1].y = h * 0.18;
+    bumpers[1].radius = 22;
+
+    bumpers[2].x = playableWidth * 0.5;
+    bumpers[2].y = h * 0.26;
+    bumpers[2].radius = 20;
+
+    // Drop targets - bank of 5 in upper area
+    dropTargets.length = 0;
+    const targetStartX = playableWidth * 0.25;
+    const targetEndX = playableWidth * 0.75;
+    const targetY = h * 0.12;
+    for (let i = 0; i < 5; i++) {
+        dropTargets.push({
+            x: targetStartX + (targetEndX - targetStartX) * i / 4,
+            y: targetY,
+            width: 6,
+            height: 25,
+            active: true
+        });
+    }
+
+    // Ramp on left side going up
+    ramp.x1 = playableWidth * 0.30;
+    ramp.y1 = h * 0.45;
+    ramp.x2 = playableWidth * 0.15;
+    ramp.y2 = h * 0.08;
+
+    // Spinner near top center
+    spinner.x = playableWidth * 0.6;
+    spinner.y = h * 0.10;
+
+    // Initialize lane guides (inlanes and outlanes)
+    initializeLaneGuides(w, h, playableWidth, flipperY);
+}
+
+function initializeLaneGuides(w, h, playableWidth, flipperY) {
+    laneGuides.length = 0;
+
+    // Outlane width - narrow to reduce draining
+    const outlaneWidth = 18;
+    const inlaneWidth = 25;
+
+    // Left side guide rails
+    // Outer wall curves down to outlane
+    laneGuides.push({
+        type: 'curve',
+        x1: 5, y1: h * 0.5,
+        x2: 5, y2: flipperY + 20
+    });
+
+    // Left outlane/inlane separator
+    laneGuides.push({
+        type: 'line',
+        x1: outlaneWidth, y1: flipperY - 80,
+        x2: outlaneWidth, y2: flipperY + 10
+    });
+
+    // Right side guide rails
+    laneGuides.push({
+        type: 'curve',
+        x1: playableWidth - 5, y1: h * 0.5,
+        x2: playableWidth - 5, y2: flipperY + 20
+    });
+
+    // Right outlane/inlane separator
+    laneGuides.push({
+        type: 'line',
+        x1: playableWidth - outlaneWidth, y1: flipperY - 80,
+        x2: playableWidth - outlaneWidth, y2: flipperY + 10
+    });
 }
 
 // Ball physics
 function updateBall() {
     if (!ball.active) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const playableWidth = w - plunger.width;
 
     // Apply gravity
     ball.vy += physics.gravity * physics.speedMultiplier;
@@ -205,7 +258,11 @@ function updateBall() {
     ball.y += ball.vy * physics.speedMultiplier;
 
     // Wall collisions
-    handleWallCollisions();
+    handleWallCollisions(w, h, playableWidth);
+
+    // Slingshot collisions
+    handleSlingshotCollision(slingshots.left);
+    handleSlingshotCollision(slingshots.right);
 
     // Flipper collisions
     handleFlipperCollision(flippers.left, true);
@@ -224,65 +281,172 @@ function updateBall() {
     handleRampCollision();
 
     // Check if ball is lost
-    if (ball.y > canvas.height + ball.radius) {
+    if (ball.y > h + ball.radius) {
         lostBall();
     }
 }
 
-function handleWallCollisions() {
-    const w = canvas.width;
-    const h = canvas.height;
+function handleWallCollisions(w, h, playableWidth) {
+    const plungerLaneLeft = playableWidth;
+    const flipperY = flippers.left.y;
 
-    // Simple boundary collisions
-    if (ball.x - ball.radius < 0) {
-        ball.x = ball.radius;
-        ball.vx = -ball.vx * physics.bounce;
+    // Left wall
+    if (ball.x - ball.radius < 5) {
+        ball.x = 5 + ball.radius;
+        ball.vx = Math.abs(ball.vx) * physics.bounce;
     }
-    if (ball.x + ball.radius > w - 40 || (ball.x + ball.radius > w && ball.y < h * 0.1)) {
-        if (ball.x > w - 40 && ball.y > h * 0.1) {
-            // In plunger lane - allow
+
+    // Right wall (main playfield, not in plunger lane)
+    if (ball.x < plungerLaneLeft && ball.x + ball.radius > plungerLaneLeft - 5) {
+        // Check if ball should enter plunger lane from top
+        if (ball.y < h * 0.08 && ball.vx > 0) {
+            // Allow ball to curve into plunger lane at top
         } else {
-            ball.x = w - 40 - ball.radius;
-            ball.vx = -ball.vx * physics.bounce;
-        }
-    }
-    if (ball.x + ball.radius > w) {
-        ball.x = w - ball.radius;
-        ball.vx = -ball.vx * physics.bounce;
-    }
-    if (ball.y - ball.radius < 0) {
-        ball.y = ball.radius;
-        ball.vy = -ball.vy * physics.bounce;
-    }
-
-    // Angled rail collisions
-    // Left rail
-    if (ball.y > h * 0.7 && ball.x < w * 0.2) {
-        const railX = ((ball.y - h * 0.7) / (h - 80 - h * 0.7)) * (w * 0.15) + 0;
-        if (ball.x - ball.radius < railX + 10) {
-            ball.x = railX + 10 + ball.radius;
-            ball.vx = Math.abs(ball.vx) * physics.bounce;
-            ball.vy *= 0.9;
-        }
-    }
-
-    // Right rail
-    if (ball.y > h * 0.7 && ball.x > w * 0.8 && ball.x < w - 40) {
-        const railX = w - ((ball.y - h * 0.7) / (h - 80 - h * 0.7)) * (w * 0.15);
-        if (ball.x + ball.radius > railX - 10) {
-            ball.x = railX - 10 - ball.radius;
+            ball.x = plungerLaneLeft - 5 - ball.radius;
             ball.vx = -Math.abs(ball.vx) * physics.bounce;
-            ball.vy *= 0.9;
         }
     }
 
-    // Out lane walls
-    if (ball.y > h - 100 && ball.y < h - 20) {
-        if (ball.x < w * 0.12 && ball.x > w * 0.06) {
-            // Left out lane
+    // Plunger lane walls
+    if (ball.x > plungerLaneLeft) {
+        // Left wall of plunger lane
+        if (ball.x - ball.radius < plungerLaneLeft + 3) {
+            ball.x = plungerLaneLeft + 3 + ball.radius;
+            ball.vx = Math.abs(ball.vx) * physics.bounce;
         }
-        if (ball.x > w * 0.88 && ball.x < w * 0.94) {
-            // Right out lane
+        // Right wall of plunger lane
+        if (ball.x + ball.radius > w - 3) {
+            ball.x = w - 3 - ball.radius;
+            ball.vx = -Math.abs(ball.vx) * physics.bounce;
+        }
+    }
+
+    // Top wall - curved at plunger lane entrance
+    if (ball.y - ball.radius < 5) {
+        ball.y = 5 + ball.radius;
+        ball.vy = Math.abs(ball.vy) * physics.bounce;
+
+        // If near plunger lane entrance, guide ball left onto playfield
+        if (ball.x > plungerLaneLeft - 40) {
+            ball.vx -= 3;
+        }
+    }
+
+    // Outlane walls - narrow passages on sides near flippers
+    const outlaneWidth = 18;
+
+    // Left outlane inner wall
+    if (ball.y > flipperY - 80 && ball.y < flipperY + 20 && ball.x > outlaneWidth - 5 && ball.x < outlaneWidth + 8) {
+        if (ball.x - ball.radius < outlaneWidth + 3) {
+            // Let ball pass through to outlane
+        } else if (ball.x + ball.radius > outlaneWidth + 3) {
+            ball.x = outlaneWidth + 3 + ball.radius;
+            ball.vx = Math.abs(ball.vx) * physics.bounce * 0.5;
+        }
+    }
+
+    // Right outlane inner wall
+    if (ball.y > flipperY - 80 && ball.y < flipperY + 20 &&
+        ball.x > playableWidth - outlaneWidth - 8 && ball.x < playableWidth - outlaneWidth + 5) {
+        if (ball.x + ball.radius > playableWidth - outlaneWidth - 3) {
+            // Let ball pass through to outlane
+        } else if (ball.x - ball.radius < playableWidth - outlaneWidth - 3) {
+            ball.x = playableWidth - outlaneWidth - 3 - ball.radius;
+            ball.vx = -Math.abs(ball.vx) * physics.bounce * 0.5;
+        }
+    }
+
+    // Guide rails from mid-field to slingshots
+    // Left guide rail
+    if (ball.y > h * 0.5 && ball.y < flipperY - 70 && ball.x < 50) {
+        const railX = 25 + (ball.y - h * 0.5) / (flipperY - 70 - h * 0.5) * 15;
+        if (ball.x - ball.radius < railX) {
+            ball.x = railX + ball.radius;
+            ball.vx = Math.abs(ball.vx) * physics.bounce * 0.7;
+        }
+    }
+
+    // Right guide rail
+    if (ball.y > h * 0.5 && ball.y < flipperY - 70 && ball.x > playableWidth - 50) {
+        const railX = playableWidth - 25 - (ball.y - h * 0.5) / (flipperY - 70 - h * 0.5) * 15;
+        if (ball.x + ball.radius > railX) {
+            ball.x = railX - ball.radius;
+            ball.vx = -Math.abs(ball.vx) * physics.bounce * 0.7;
+        }
+    }
+}
+
+function handleSlingshotCollision(slingshot) {
+    const points = slingshot.points;
+    if (points.length < 3) return;
+
+    // Check if ball is inside or near the triangular slingshot area
+    // Check collision with each edge of the triangle
+    for (let i = 0; i < 3; i++) {
+        const p1 = points[i];
+        const p2 = points[(i + 1) % 3];
+
+        const dist = pointToLineDistance(ball.x, ball.y, p1.x, p1.y, p2.x, p2.y);
+
+        if (dist < ball.radius + 4) {
+            // Calculate normal vector for this edge
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const len = Math.sqrt(dx * dx + dy * dy);
+
+            // Normal pointing outward from triangle center
+            const centerX = (points[0].x + points[1].x + points[2].x) / 3;
+            const centerY = (points[0].y + points[1].y + points[2].y) / 3;
+
+            let nx = -dy / len;
+            let ny = dx / len;
+
+            // Make sure normal points away from center
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;
+            if ((midX + nx - centerX) * (midX - centerX) + (midY + ny - centerY) * (midY - centerY) < 0) {
+                nx = -nx;
+                ny = -ny;
+            }
+
+            // Calculate ball velocity magnitude
+            const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+
+            // Check if hit is hard enough to trigger slingshot bounce
+            const impactVelocity = Math.abs(ball.vx * nx + ball.vy * ny);
+
+            if (impactVelocity > physics.slingThreshold) {
+                // Hard hit - slingshot activates and bounces ball
+                ball.vx = nx * physics.slingForce;
+                ball.vy = ny * physics.slingForce - 2; // Slight upward bias
+
+                slingshot.active = true;
+                slingshot.timer = 8;
+                addScore(25);
+            } else {
+                // Soft hit - act like a wall, guide ball toward flipper
+                const dot = ball.vx * nx + ball.vy * ny;
+                ball.vx = ball.vx - 1.5 * dot * nx;
+                ball.vy = ball.vy - 1.5 * dot * ny;
+
+                // Apply some friction for soft contact
+                ball.vx *= 0.85;
+                ball.vy *= 0.85;
+            }
+
+            // Move ball out of slingshot
+            ball.x += nx * (ball.radius + 5 - dist);
+            ball.y += ny * (ball.radius + 5 - dist);
+
+            break;
+        }
+    }
+
+    // Update slingshot animation
+    if (slingshot.timer > 0) {
+        slingshot.timer--;
+        if (slingshot.timer === 0) {
+            slingshot.active = false;
         }
     }
 }
@@ -291,34 +455,32 @@ function handleFlipperCollision(flipper, isLeft) {
     const flipperEndX = flipper.x + Math.cos(flipper.angle) * flipper.length;
     const flipperEndY = flipper.y + Math.sin(flipper.angle) * flipper.length;
 
-    // Check collision with flipper line
     const dist = pointToLineDistance(ball.x, ball.y, flipper.x, flipper.y, flipperEndX, flipperEndY);
 
-    if (dist < ball.radius + 5) {
-        // Calculate reflection
+    if (dist < ball.radius + 7) {
         const dx = flipperEndX - flipper.x;
         const dy = flipperEndY - flipper.y;
         const len = Math.sqrt(dx * dx + dy * dy);
         const nx = -dy / len;
         const ny = dx / len;
 
-        // Reflect velocity
+        // Ensure normal points upward
+        const normalUp = ny < 0 ? 1 : -1;
+
         const dot = ball.vx * nx + ball.vy * ny;
+        let power = flipper.active ? physics.flipperPower : 3;
 
-        // Add flipper power if flipper is active
-        let power = flipper.active ? physics.flipperPower : 5;
+        ball.vx = ball.vx - 2 * dot * nx * normalUp;
+        ball.vy = ball.vy - 2 * dot * ny * normalUp - power;
 
-        ball.vx = ball.vx - 2 * dot * nx;
-        ball.vy = ball.vy - 2 * dot * ny - power;
-
-        // Add horizontal component based on where ball hit flipper
+        // Add horizontal component based on hit position
         const hitPos = ((ball.x - flipper.x) * dx + (ball.y - flipper.y) * dy) / (len * len);
-        ball.vx += (isLeft ? 1 : -1) * hitPos * power * 0.5;
+        ball.vx += (isLeft ? 1 : -1) * hitPos * power * 0.6;
 
         // Move ball out of flipper
-        ball.y = Math.min(ball.y, flipper.y - ball.radius - 5);
+        ball.x += nx * normalUp * (ball.radius + 8 - dist);
+        ball.y = Math.min(ball.y, flipper.y - ball.radius - 8);
 
-        // Apply bounce
         ball.vx *= physics.bounce;
         ball.vy *= physics.bounce;
     }
@@ -344,26 +506,21 @@ function handleBumperCollision(bumper) {
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist < ball.radius + bumper.radius) {
-        // Normalize direction
         const nx = dx / dist;
         const ny = dy / dist;
 
-        // Apply bumper force
         ball.vx = nx * physics.bumperForce;
         ball.vy = ny * physics.bumperForce;
 
-        // Move ball out of bumper
-        ball.x = bumper.x + nx * (ball.radius + bumper.radius + 1);
-        ball.y = bumper.y + ny * (ball.radius + bumper.radius + 1);
+        ball.x = bumper.x + nx * (ball.radius + bumper.radius + 2);
+        ball.y = bumper.y + ny * (ball.radius + bumper.radius + 2);
 
-        // Score and animation
         addScore(100);
         bumper.active = true;
         bumper.timer = 10;
         bumper.hits++;
     }
 
-    // Update bumper animation
     if (bumper.timer > 0) {
         bumper.timer--;
         if (bumper.timer === 0) {
@@ -381,14 +538,12 @@ function handleDropTargetCollision(target) {
         ball.y < target.y + target.height / 2 + ball.radius) {
 
         target.active = false;
-        ball.vx = -ball.vx * physics.bounce;
+        ball.vy = Math.abs(ball.vy) * physics.bounce; // Bounce back
         addScore(500);
 
-        // Check if all targets are down
         const allDown = dropTargets.every(t => !t.active);
         if (allDown) {
             addScore(5000);
-            // Reset targets after delay
             setTimeout(() => {
                 dropTargets.forEach(t => t.active = true);
             }, 2000);
@@ -399,40 +554,34 @@ function handleDropTargetCollision(target) {
 function handleSpinnerCollision() {
     const spinnerLeft = spinner.x - spinner.width / 2;
     const spinnerRight = spinner.x + spinner.width / 2;
-    const spinnerTop = spinner.y - spinner.height / 2;
-    const spinnerBottom = spinner.y + spinner.height / 2;
+    const spinnerTop = spinner.y - 15;
+    const spinnerBottom = spinner.y + 15;
 
     if (ball.x + ball.radius > spinnerLeft &&
         ball.x - ball.radius < spinnerRight &&
         ball.y + ball.radius > spinnerTop &&
         ball.y - ball.radius < spinnerBottom) {
 
-        // Add spin based on ball velocity
-        spinner.spinSpeed += ball.vx * 0.5;
-
-        // Ball passes through but slows slightly
-        ball.vy *= 0.95;
-
+        spinner.spinSpeed += ball.vy * 0.3;
+        ball.vy *= 0.9;
         addScore(50);
     }
 }
 
 function handleRampCollision() {
-    // Check if ball is entering ramp
-    const rampWidth = 35;
+    const rampWidth = 30;
     if (ball.x > ramp.x1 - rampWidth / 2 &&
         ball.x < ramp.x1 + rampWidth / 2 &&
-        ball.y > ramp.y1 - 20 &&
-        ball.y < ramp.y1 + 20 &&
-        ball.vy < 0) {
+        ball.y > ramp.y1 - 25 &&
+        ball.y < ramp.y1 + 25 &&
+        ball.vy < -5) {
 
-        // Ball is going up and near ramp entrance - guide it up
         const rampAngle = Math.atan2(ramp.y2 - ramp.y1, ramp.x2 - ramp.x1);
         const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
 
-        if (speed > 8) {
-            ball.vx = Math.cos(rampAngle) * speed * 0.8;
-            ball.vy = Math.sin(rampAngle) * speed * 0.8;
+        if (speed > 10) {
+            ball.vx = Math.cos(rampAngle) * speed * 0.85;
+            ball.vy = Math.sin(rampAngle) * speed * 0.85;
             addScore(200);
         }
     }
@@ -442,21 +591,18 @@ function updateSpinner() {
     spinner.angle += spinner.spinSpeed;
     spinner.spinSpeed *= spinner.friction;
 
-    // Add score based on spin speed
     if (Math.abs(spinner.spinSpeed) > 0.5) {
         addScore(Math.floor(Math.abs(spinner.spinSpeed)));
     }
 }
 
 function updateFlippers() {
-    // Left flipper
     if (flippers.left.active) {
         flippers.left.angle += (flippers.left.maxAngle - flippers.left.angle) * flippers.left.speed;
     } else {
         flippers.left.angle += (flippers.left.targetAngle - flippers.left.angle) * flippers.left.speed * 0.5;
     }
 
-    // Right flipper
     if (flippers.right.active) {
         flippers.right.angle += (flippers.right.maxAngle - flippers.right.angle) * flippers.right.speed;
     } else {
@@ -491,7 +637,6 @@ function gameOver() {
     gameState.isPlaying = false;
     gameState.ballInPlay = false;
 
-    // Show game over
     setTimeout(() => {
         alert(`Game Over!\nFinal Score: ${gameState.score}\nHigh Score: ${gameState.highScore}`);
         resetGame();
@@ -507,10 +652,7 @@ function resetGame() {
     document.getElementById('score').textContent = '0';
     document.getElementById('ballCount').textContent = '3';
 
-    // Reset drop targets
     dropTargets.forEach(t => t.active = true);
-
-    // Reset bumpers
     bumpers.forEach(b => {
         b.hits = 0;
         b.active = false;
@@ -524,21 +666,32 @@ function launchBall() {
     gameState.ballInPlay = true;
 
     // Position ball in plunger lane
+    const w = canvas.width;
+    const h = canvas.height;
     ball.x = plunger.x;
-    ball.y = canvas.height - 50;
-    ball.vx = -2;
-    ball.vy = -15 - Math.random() * 5;
+    ball.y = h - 60;
+
+    // Strong launch to reach top of table
+    ball.vx = -3 - Math.random() * 2;
+    ball.vy = -28 - Math.random() * 5; // Much stronger launch
     ball.active = true;
 }
 
 // Drawing functions
 function draw() {
-    // Clear canvas
-    ctx.fillStyle = '#0f0f23';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const w = canvas.width;
+    const h = canvas.height;
+    const playableWidth = w - plunger.width;
 
-    // Draw playfield background pattern
-    drawPlayfield();
+    // Clear canvas with dark background
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0, 0, w, h);
+
+    // Draw playfield
+    drawPlayfield(playableWidth, h);
+
+    // Draw plunger lane
+    drawPlungerLane(w, h, playableWidth);
 
     // Draw ramp
     drawRamp();
@@ -552,45 +705,149 @@ function draw() {
     // Draw drop targets
     dropTargets.forEach(drawDropTarget);
 
+    // Draw slingshots
+    drawSlingshot(slingshots.left, true);
+    drawSlingshot(slingshots.right, false);
+
     // Draw flippers
     drawFlipper(flippers.left, true);
     drawFlipper(flippers.right, false);
 
-    // Draw walls/rails
-    drawWalls();
-
-    // Draw plunger lane
-    drawPlungerLane();
+    // Draw lane guides
+    drawLaneGuides(playableWidth, h);
 
     // Draw ball
     if (ball.active) {
         drawBall();
     }
 
-    // Draw launch indicator if ball not in play
+    // Draw launch indicator
     if (!gameState.ballInPlay && gameState.ballsRemaining > 0) {
-        drawLaunchIndicator();
+        drawLaunchIndicator(w, h);
     }
 }
 
-function drawPlayfield() {
-    // Grid pattern
-    ctx.strokeStyle = 'rgba(78, 205, 196, 0.1)';
-    ctx.lineWidth = 1;
+function drawPlayfield(playableWidth, h) {
+    // Playfield background gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, h);
+    gradient.addColorStop(0, '#1a1a3e');
+    gradient.addColorStop(0.5, '#0f0f28');
+    gradient.addColorStop(1, '#0a0a1a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, playableWidth, h);
 
-    for (let x = 0; x < canvas.width; x += 30) {
+    // Subtle grid pattern
+    ctx.strokeStyle = 'rgba(78, 205, 196, 0.05)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < playableWidth; x += 25) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+    }
+    for (let y = 0; y < h; y += 25) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(playableWidth, y);
         ctx.stroke();
     }
 
-    for (let y = 0; y < canvas.height; y += 30) {
+    // Playfield border
+    ctx.strokeStyle = '#4ecdc4';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(2.5, 2.5, playableWidth - 5, h - 5);
+}
+
+function drawPlungerLane(w, h, playableWidth) {
+    // Plunger lane background
+    ctx.fillStyle = 'rgba(40, 40, 60, 0.8)';
+    ctx.fillRect(playableWidth, 0, plunger.width, h);
+
+    // Lane border
+    ctx.strokeStyle = '#4ecdc4';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(playableWidth, 0);
+    ctx.lineTo(playableWidth, h);
+    ctx.stroke();
+
+    // Curved top entrance
+    ctx.beginPath();
+    ctx.arc(playableWidth + plunger.width / 2, 25, plunger.width / 2 - 5, Math.PI, 0);
+    ctx.strokeStyle = '#4ecdc4';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Plunger mechanism
+    if (!gameState.ballInPlay) {
+        // Plunger rod
+        ctx.fillStyle = '#c0392b';
+        ctx.fillRect(plunger.x - 8, h - 100, 16, 70);
+
+        // Plunger handle
+        ctx.fillStyle = '#e74c3c';
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
+        ctx.arc(plunger.x, h - 35, 12, 0, Math.PI * 2);
+        ctx.fill();
     }
+}
+
+function drawSlingshot(slingshot, isLeft) {
+    const points = slingshot.points;
+    if (points.length < 3) return;
+
+    // Slingshot body
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    ctx.lineTo(points[1].x, points[1].y);
+    ctx.lineTo(points[2].x, points[2].y);
+    ctx.closePath();
+
+    // Fill with gradient
+    const gradient = ctx.createLinearGradient(
+        points[0].x, points[1].y,
+        points[2].x, points[0].y
+    );
+
+    if (slingshot.active) {
+        gradient.addColorStop(0, '#fff');
+        gradient.addColorStop(0.5, '#ffeb3b');
+        gradient.addColorStop(1, '#ff9800');
+    } else {
+        gradient.addColorStop(0, '#ff9800');
+        gradient.addColorStop(0.5, '#e65100');
+        gradient.addColorStop(1, '#bf360c');
+    }
+
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // Rubber band effect (inner triangle)
+    ctx.strokeStyle = slingshot.active ? '#fff' : '#ffeb3b';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    const inset = 8;
+    const cx = (points[0].x + points[1].x + points[2].x) / 3;
+    const cy = (points[0].y + points[1].y + points[2].y) / 3;
+
+    for (let i = 0; i < 3; i++) {
+        const px = points[i].x + (cx - points[i].x) * 0.25;
+        const py = points[i].y + (cy - points[i].y) * 0.25;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    // Border
+    ctx.strokeStyle = '#4ecdc4';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    ctx.lineTo(points[1].x, points[1].y);
+    ctx.lineTo(points[2].x, points[2].y);
+    ctx.closePath();
+    ctx.stroke();
 }
 
 function drawRamp() {
@@ -598,8 +855,7 @@ function drawRamp() {
     ctx.lineWidth = 4;
     ctx.lineCap = 'round';
 
-    // Ramp rails
-    const offset = 15;
+    const offset = 12;
     ctx.beginPath();
     ctx.moveTo(ramp.x1 - offset, ramp.y1);
     ctx.lineTo(ramp.x2 - offset, ramp.y2);
@@ -610,15 +866,16 @@ function drawRamp() {
     ctx.lineTo(ramp.x2 + offset, ramp.y2);
     ctx.stroke();
 
-    // Ramp entry
-    ctx.fillStyle = 'rgba(155, 89, 182, 0.3)';
-    ctx.fillRect(ramp.x1 - 20, ramp.y1 - 10, 40, 20);
+    // Ramp entry highlight
+    ctx.fillStyle = 'rgba(155, 89, 182, 0.4)';
+    ctx.beginPath();
+    ctx.arc(ramp.x1, ramp.y1, 18, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Ramp label
     ctx.fillStyle = '#9b59b6';
-    ctx.font = '10px Arial';
+    ctx.font = 'bold 9px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('RAMP', ramp.x1, ramp.y1 + 4);
+    ctx.fillText('RAMP', ramp.x1, ramp.y1 + 3);
 }
 
 function drawSpinner() {
@@ -626,7 +883,6 @@ function drawSpinner() {
     ctx.translate(spinner.x, spinner.y);
     ctx.rotate(spinner.angle);
 
-    // Spinner bar
     const gradient = ctx.createLinearGradient(-spinner.width / 2, 0, spinner.width / 2, 0);
     gradient.addColorStop(0, '#e74c3c');
     gradient.addColorStop(0.5, '#f39c12');
@@ -635,7 +891,6 @@ function drawSpinner() {
     ctx.fillStyle = gradient;
     ctx.fillRect(-spinner.width / 2, -spinner.height / 2, spinner.width, spinner.height);
 
-    // Center pivot
     ctx.fillStyle = '#333';
     ctx.beginPath();
     ctx.arc(0, 0, 4, 0, Math.PI * 2);
@@ -647,19 +902,18 @@ function drawSpinner() {
     ctx.strokeStyle = '#e74c3c';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(spinner.x, spinner.y, spinner.width / 2 + 5, 0, Math.PI * 2);
+    ctx.arc(spinner.x, spinner.y, spinner.width / 2 + 8, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Label
     ctx.fillStyle = '#e74c3c';
     ctx.font = '8px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('SPINNER', spinner.x, spinner.y + spinner.width / 2 + 15);
+    ctx.fillText('SPINNER', spinner.x, spinner.y + spinner.width / 2 + 18);
 }
 
 function drawBumper(bumper) {
     const gradient = ctx.createRadialGradient(
-        bumper.x - 5, bumper.y - 5, 0,
+        bumper.x - 4, bumper.y - 4, 0,
         bumper.x, bumper.y, bumper.radius
     );
 
@@ -678,16 +932,14 @@ function drawBumper(bumper) {
     ctx.arc(bumper.x, bumper.y, bumper.radius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Ring
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(bumper.x, bumper.y, bumper.radius - 3, 0, Math.PI * 2);
+    ctx.arc(bumper.x, bumper.y, bumper.radius - 4, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Score text
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px Arial';
+    ctx.font = 'bold 11px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('100', bumper.x, bumper.y);
@@ -699,8 +951,8 @@ function drawDropTarget(target) {
             target.x, target.y - target.height / 2,
             target.x, target.y + target.height / 2
         );
-        gradient.addColorStop(0, '#27ae60');
-        gradient.addColorStop(1, '#1e8449');
+        gradient.addColorStop(0, '#2ecc71');
+        gradient.addColorStop(1, '#27ae60');
 
         ctx.fillStyle = gradient;
         ctx.fillRect(
@@ -710,8 +962,7 @@ function drawDropTarget(target) {
             target.height
         );
 
-        // Highlight
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.fillRect(
             target.x - target.width / 2,
             target.y - target.height / 2,
@@ -719,8 +970,7 @@ function drawDropTarget(target) {
             target.height
         );
     } else {
-        // Knocked down target
-        ctx.fillStyle = 'rgba(39, 174, 96, 0.3)';
+        ctx.fillStyle = 'rgba(39, 174, 96, 0.2)';
         ctx.fillRect(
             target.x - target.width / 2,
             target.y - target.height / 2,
@@ -734,7 +984,16 @@ function drawFlipper(flipper, isLeft) {
     const endX = flipper.x + Math.cos(flipper.angle) * flipper.length;
     const endY = flipper.y + Math.sin(flipper.angle) * flipper.length;
 
-    // Flipper body
+    // Flipper shadow
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.lineWidth = 16;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(flipper.x + 2, flipper.y + 2);
+    ctx.lineTo(endX + 2, endY + 2);
+    ctx.stroke();
+
+    // Flipper body - tapered shape
     ctx.strokeStyle = flipper.active ? '#4ecdc4' : '#3498db';
     ctx.lineWidth = 14;
     ctx.lineCap = 'round';
@@ -744,8 +1003,8 @@ function drawFlipper(flipper, isLeft) {
     ctx.stroke();
 
     // Flipper highlight
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.moveTo(flipper.x, flipper.y);
     ctx.lineTo(endX, endY);
@@ -754,90 +1013,75 @@ function drawFlipper(flipper, isLeft) {
     // Pivot point
     ctx.fillStyle = '#2c3e50';
     ctx.beginPath();
-    ctx.arc(flipper.x, flipper.y, 8, 0, Math.PI * 2);
+    ctx.arc(flipper.x, flipper.y, 9, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#1a1a2e';
+    ctx.beginPath();
+    ctx.arc(flipper.x, flipper.y, 5, 0, Math.PI * 2);
     ctx.fill();
 }
 
-function drawWalls() {
+function drawLaneGuides(playableWidth, h) {
+    const flipperY = flippers.left.y;
+    const outlaneWidth = 18;
+
     ctx.strokeStyle = '#4ecdc4';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 3;
     ctx.lineCap = 'round';
 
-    // Left rail
+    // Left outlane separator
     ctx.beginPath();
-    ctx.moveTo(0, canvas.height * 0.7);
-    ctx.lineTo(canvas.width * 0.15, canvas.height - 80);
+    ctx.moveTo(outlaneWidth, flipperY - 80);
+    ctx.lineTo(outlaneWidth, flipperY + 15);
     ctx.stroke();
 
-    // Right rail (up to plunger lane)
+    // Right outlane separator
     ctx.beginPath();
-    ctx.moveTo(canvas.width - 40, canvas.height * 0.7);
-    ctx.lineTo(canvas.width * 0.85, canvas.height - 80);
+    ctx.moveTo(playableWidth - outlaneWidth, flipperY - 80);
+    ctx.lineTo(playableWidth - outlaneWidth, flipperY + 15);
     ctx.stroke();
 
-    // Out lane separators
-    ctx.lineWidth = 3;
+    // Left guide rail (from mid-field to slingshot)
     ctx.beginPath();
-    ctx.moveTo(canvas.width * 0.08, canvas.height - 80);
-    ctx.lineTo(canvas.width * 0.08, canvas.height - 20);
+    ctx.moveTo(5, h * 0.45);
+    ctx.quadraticCurveTo(15, h * 0.55, 25, flipperY - 75);
     ctx.stroke();
 
+    // Right guide rail
     ctx.beginPath();
-    ctx.moveTo(canvas.width * 0.92 - 40, canvas.height - 80);
-    ctx.lineTo(canvas.width * 0.92 - 40, canvas.height - 20);
+    ctx.moveTo(playableWidth - 5, h * 0.45);
+    ctx.quadraticCurveTo(playableWidth - 15, h * 0.55, playableWidth - 25, flipperY - 75);
     ctx.stroke();
 
-    // Drain area
+    // Drain area indicator
     ctx.fillStyle = 'rgba(231, 76, 60, 0.3)';
-    ctx.fillRect(canvas.width * 0.15, canvas.height - 30, canvas.width * 0.7 - 40, 30);
+    const drainLeft = outlaneWidth + 10;
+    const drainRight = playableWidth - outlaneWidth - 10;
+    ctx.fillRect(drainLeft, flipperY + 25, drainRight - drainLeft, 35);
+
     ctx.fillStyle = '#e74c3c';
-    ctx.font = '12px Arial';
+    ctx.font = 'bold 10px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('DRAIN', canvas.width * 0.5 - 20, canvas.height - 12);
-}
-
-function drawPlungerLane() {
-    // Plunger lane background
-    ctx.fillStyle = 'rgba(52, 73, 94, 0.5)';
-    ctx.fillRect(canvas.width - 40, 0, 40, canvas.height);
-
-    // Lane border
-    ctx.strokeStyle = '#4ecdc4';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(canvas.width - 40, canvas.height * 0.1);
-    ctx.lineTo(canvas.width - 40, canvas.height);
-    ctx.stroke();
-
-    // Curve at top
-    ctx.beginPath();
-    ctx.arc(canvas.width - 20, canvas.height * 0.1, 20, Math.PI, 0);
-    ctx.stroke();
-
-    // Plunger
-    if (!gameState.ballInPlay) {
-        ctx.fillStyle = '#e74c3c';
-        ctx.fillRect(canvas.width - 35, canvas.height - 80, 20, 60);
-        ctx.fillStyle = '#c0392b';
-        ctx.fillRect(canvas.width - 35, canvas.height - 30, 20, 10);
-    }
+    ctx.fillText('DRAIN', playableWidth / 2, flipperY + 45);
 }
 
 function drawBall() {
     // Ball shadow
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
     ctx.beginPath();
-    ctx.arc(ball.x + 3, ball.y + 3, ball.radius, 0, Math.PI * 2);
+    ctx.arc(ball.x + 2, ball.y + 2, ball.radius, 0, Math.PI * 2);
     ctx.fill();
 
     // Ball gradient
     const gradient = ctx.createRadialGradient(
-        ball.x - 3, ball.y - 3, 0,
+        ball.x - 2, ball.y - 2, 0,
         ball.x, ball.y, ball.radius
     );
     gradient.addColorStop(0, '#fff');
-    gradient.addColorStop(0.3, '#ddd');
-    gradient.addColorStop(1, '#888');
+    gradient.addColorStop(0.3, '#e0e0e0');
+    gradient.addColorStop(0.7, '#b0b0b0');
+    gradient.addColorStop(1, '#808080');
 
     ctx.fillStyle = gradient;
     ctx.beginPath();
@@ -845,24 +1089,27 @@ function drawBall() {
     ctx.fill();
 
     // Ball highlight
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
     ctx.beginPath();
-    ctx.arc(ball.x - 3, ball.y - 3, ball.radius * 0.3, 0, Math.PI * 2);
+    ctx.arc(ball.x - 2, ball.y - 2, ball.radius * 0.35, 0, Math.PI * 2);
     ctx.fill();
 }
 
-function drawLaunchIndicator() {
-    ctx.fillStyle = 'rgba(78, 205, 196, 0.5)';
-    ctx.font = '14px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('Press SPACE to launch!', canvas.width / 2, canvas.height / 2);
+function drawLaunchIndicator(w, h) {
+    const playableWidth = w - plunger.width;
 
-    // Blinking ball position
+    ctx.fillStyle = 'rgba(78, 205, 196, 0.7)';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press SPACE', playableWidth / 2, h / 2 - 10);
+    ctx.fillText('to launch!', playableWidth / 2, h / 2 + 10);
+
+    // Blinking ball in plunger lane
     const blink = Math.sin(Date.now() / 200) > 0;
     if (blink) {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
         ctx.beginPath();
-        ctx.arc(plunger.x, canvas.height - 50, ball.radius, 0, Math.PI * 2);
+        ctx.arc(plunger.x, h - 60, ball.radius, 0, Math.PI * 2);
         ctx.fill();
     }
 }
