@@ -51,13 +51,11 @@
         #leftIndicator {
             left: 20px;
             background: linear-gradient(135deg, #ff00ff, #ff0080);
-            box-shadow: 0 0 20px #ff00ff;
         }
 
         #rightIndicator {
             right: 20px;
             background: linear-gradient(135deg, #00ffff, #0080ff);
-            box-shadow: 0 0 20px #00ffff;
         }
 
         #launchIndicator {
@@ -65,7 +63,6 @@
             transform: translateX(-50%);
             bottom: 80px;
             background: linear-gradient(135deg, #00ff00, #80ff00);
-            box-shadow: 0 0 20px #00ff00;
         }
 
         #launchIndicator.active {
@@ -95,12 +92,10 @@
 
         #scoreDisplay {
             border-color: #ff00ff;
-            text-shadow: 0 0 10px #ff00ff;
         }
 
         #ballDisplay {
             border-color: #00ffff;
-            text-shadow: 0 0 10px #00ffff;
         }
 
         /* Instructions overlay */
@@ -125,7 +120,6 @@
         #instructions h1 {
             font-size: 2.5em;
             color: #ff00ff;
-            text-shadow: 0 0 20px #ff00ff, 0 0 40px #ff00ff;
             margin-bottom: 20px;
             letter-spacing: 5px;
         }
@@ -134,7 +128,6 @@
             font-size: 1em;
             margin: 10px 0;
             color: #00ffff;
-            text-shadow: 0 0 10px #00ffff;
         }
 
         .key {
@@ -246,9 +239,9 @@
             createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
         }
 
-        // Shooter segments (101-150)
+        // Shooter segments (101-150) - radius must be bigger than ball to block it
         for (let i = 0; i < 50; i++) {
-            const shooter = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS - 15, SHOOTER_Y + i, TYPE_WALL, 5);
+            const shooter = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS - 15, SHOOTER_Y + i * 2, TYPE_WALL, 12);
             shooter.isShooter = true;
             shooter.shooterIndex = i;
         }
@@ -366,11 +359,11 @@
                 const shooter = objects[shooterStart + i];
                 if (shooter && shooter.isShooter) {
                     const targetY = keys.c ?
-                        SHOOTER_Y + 30 + i :
-                        SHOOTER_Y + i;
+                        SHOOTER_Y + 50 + i * 2 :  // Pull back further when charging
+                        SHOOTER_Y + i * 2;         // Normal position blocks ball
 
                     const prevY = shooter.y;
-                    shooter.y += (targetY - shooter.y) * (keys.c ? 0.02 : 0.15);
+                    shooter.y += (targetY - shooter.y) * (keys.c ? 0.02 : 0.18);
                     shooter.vy = shooter.y - prevY;
                 }
             }
@@ -465,24 +458,18 @@
         }
     }
 
-    // === NEON DRAWING ===
-    function drawNeonCircle(x, y, radius, color, glowSize = 1) {
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 15 * glowSize;
-
+    // === DRAWING (no glow, just colors) ===
+    function drawCircle(x, y, radius, color) {
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = '#ffffff';
-        ctx.globalAlpha = 0.6;
+        // Subtle highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.beginPath();
-        ctx.arc(x, y, radius * 0.4, 0, Math.PI * 2);
+        ctx.arc(x - radius * 0.2, y - radius * 0.2, radius * 0.3, 0, Math.PI * 2);
         ctx.fill();
-        ctx.globalAlpha = 1;
-
-        ctx.shadowBlur = 0;
     }
 
     function draw() {
@@ -509,24 +496,19 @@
             ctx.stroke();
         }
 
-        // Draw neon border
+        // Draw border
         ctx.strokeStyle = '#00ffff';
-        ctx.shadowColor = '#00ffff';
-        ctx.shadowBlur = 20;
         ctx.lineWidth = 3;
         ctx.strokeRect(5, 5, TABLE_WIDTH - 10, TABLE_HEIGHT - 10);
-        ctx.shadowBlur = 0;
 
         // Draw all objects
         for (let i = objects.length - 1; i >= 0; i--) {
             const obj = objects[i];
 
             let color = obj.color;
-            let glowSize = 1;
 
             if (obj.bounce > 0) {
                 color = '#ffffff';
-                glowSize = 1 + obj.bounce / 5;
             }
 
             if (i >= 1 && i <= FLIPPER_SEGMENTS) {
@@ -541,26 +523,22 @@
 
             if (obj.isBall) {
                 // Ball trail
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
                 ctx.beginPath();
                 ctx.arc(obj.x - obj.vx * 3, obj.y - obj.vy * 3, obj.radius * 0.8, 0, Math.PI * 2);
                 ctx.fill();
 
                 color = '#ffffff';
-                glowSize = 2;
             }
 
-            drawNeonCircle(obj.x, obj.y, obj.radius + (obj.bounce || 0), color, glowSize);
+            drawCircle(obj.x, obj.y, obj.radius + (obj.bounce || 0), color);
         }
 
         // Score display in table
         ctx.fillStyle = '#ff00ff';
-        ctx.shadowColor = '#ff00ff';
-        ctx.shadowBlur = 10;
         ctx.font = 'bold 16px Arial';
         ctx.textAlign = 'left';
         ctx.fillText('SCORE: ' + score, 30, TABLE_HEIGHT - 20);
-        ctx.shadowBlur = 0;
 
         ctx.restore();
 
