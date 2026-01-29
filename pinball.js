@@ -186,36 +186,44 @@ function initializeGameElements() {
 
     // Flipper positions - proper spacing with drain gap between them
     const flipperY = h - 55;
-    const drainGap = 35; // Gap between flipper tips when at rest (the drain)
-    const flipperSpread = drainGap + flipperLength * 1.6; // Distance between pivot points
+    const drainGap = 40; // Gap between flipper tips when at rest (the drain)
+    const flipperSpread = drainGap + flipperLength * 1.8; // Distance between pivot points
 
     flippers.left.x = centerX - flipperSpread / 2;
     flippers.left.y = flipperY;
     flippers.right.x = centerX + flipperSpread / 2;
     flippers.right.y = flipperY;
 
-    // Slingshot positions - triangular kickers just above and outside each flipper
-    // They form the inner walls of the inlane channels
-    const slingshotHeight = 55;
-    const slingshotWidth = 35;
-    const slingshotInset = 15; // Distance from outer wall
+    // === SLINGSHOTS ===
+    // Positioned ABOVE the flippers with room for ball to roll underneath
+    // Oriented vertically with the LONG rubber-band edge facing CENTER
+    // The apex points toward the wall, rubber band edge faces inward
+    // This allows ball to bounce back and forth between slingshots over the flippers
 
-    // Left slingshot - positioned to create inlane channel to left flipper
-    const leftSlingshotX = slingshotInset;
-    const leftSlingshotInnerX = flippers.left.x - 10;
+    const slingshotHeight = 55;  // Vertical height of the long edge (rubber band)
+    const slingshotDepth = 25;   // How far the apex protrudes toward the wall
+    const slingshotBottomY = flipperY - 50; // Leave MORE room for ball to roll under (was 25)
+    const slingshotTopY = slingshotBottomY - slingshotHeight;
+
+    // Outlane gap on each side
+    const outlaneWidth = 18;
+
+    // Left slingshot - LONG EDGE (rubber band) faces CENTER/RIGHT
+    // Two points near center form the long rubber band edge
+    // One point (apex) near wall
+    const leftSlingshotCenterX = outlaneWidth + slingshotDepth + 8; // X position of rubber band edge
     slingshots.left.points = [
-        { x: leftSlingshotInnerX, y: flipperY - 5 },              // Bottom inner (near flipper)
-        { x: leftSlingshotX + 5, y: flipperY - slingshotHeight }, // Top outer
-        { x: leftSlingshotX + 5, y: flipperY - 5 }                // Bottom outer (near wall)
+        { x: leftSlingshotCenterX, y: slingshotTopY },           // Top of rubber band (toward center)
+        { x: leftSlingshotCenterX, y: slingshotBottomY },        // Bottom of rubber band (toward center)
+        { x: outlaneWidth + 5, y: (slingshotTopY + slingshotBottomY) / 2 } // Apex pointing toward wall
     ];
 
-    // Right slingshot - positioned to create inlane channel to right flipper
-    const rightSlingshotX = playableWidth - slingshotInset;
-    const rightSlingshotInnerX = flippers.right.x + 10;
+    // Right slingshot - LONG EDGE (rubber band) faces CENTER/LEFT
+    const rightSlingshotCenterX = playableWidth - outlaneWidth - slingshotDepth - 8;
     slingshots.right.points = [
-        { x: rightSlingshotInnerX, y: flipperY - 5 },               // Bottom inner (near flipper)
-        { x: rightSlingshotX - 5, y: flipperY - slingshotHeight },  // Top outer
-        { x: rightSlingshotX - 5, y: flipperY - 5 }                 // Bottom outer (near wall)
+        { x: rightSlingshotCenterX, y: slingshotTopY },          // Top of rubber band (toward center)
+        { x: rightSlingshotCenterX, y: slingshotBottomY },       // Bottom of rubber band (toward center)
+        { x: playableWidth - outlaneWidth - 5, y: (slingshotTopY + slingshotBottomY) / 2 } // Apex pointing toward wall
     ];
 
     // Pop bumpers - cluster in upper middle area (below the curve)
@@ -258,34 +266,21 @@ function initializeGameElements() {
     spinner.y = h * 0.12;
 
     // Initialize lane guides (inlanes and outlanes)
-    initializeLaneGuides(w, h, playableWidth, flipperY, centerX);
+    initializeLaneGuides(w, h, playableWidth, flipperY, centerX, outlaneWidth, slingshotTopY, slingshotBottomY);
+
+    // Ball radius adjustment for better gameplay
+    ball.radius = Math.max(7, Math.min(10, playableWidth * 0.03));
 }
 
-function initializeLaneGuides(w, h, playableWidth, flipperY, centerX) {
+function initializeLaneGuides(w, h, playableWidth, flipperY, centerX, outlaneWidth, slingshotTopY, slingshotBottomY) {
     laneGuides.length = 0;
 
     // Store key positions for collision detection
     laneGuides.playableWidth = playableWidth;
     laneGuides.flipperY = flipperY;
-
-    // Outlane width - narrow channel on the outside
-    const outlaneWidth = 12;
-
-    // The slingshots form the inner boundary of the inlane
-    // Outlane separators - thin walls between outlane and inlane
-    const leftOutlaneSep = outlaneWidth + 3;
-    const rightOutlaneSep = playableWidth - outlaneWidth - 3;
-
-    // Guide walls that channel ball from mid-field to slingshots/flippers
-    laneGuides.leftGuideTop = { x: 8, y: h * 0.50 };
-    laneGuides.leftGuideBottom = { x: slingshots.left.points[1].x, y: slingshots.left.points[1].y };
-
-    laneGuides.rightGuideTop = { x: playableWidth - 8, y: h * 0.50 };
-    laneGuides.rightGuideBottom = { x: slingshots.right.points[1].x, y: slingshots.right.points[1].y };
-
-    // Outlane separator positions
-    laneGuides.leftOutlaneSep = leftOutlaneSep;
-    laneGuides.rightOutlaneSep = rightOutlaneSep;
+    laneGuides.outlaneWidth = outlaneWidth;
+    laneGuides.slingshotTopY = slingshotTopY;
+    laneGuides.slingshotBottomY = slingshotBottomY;
 }
 
 // Ball physics
@@ -340,39 +335,43 @@ function handleWallCollisions(w, h, playableWidth) {
     const plungerLaneLeft = playableWidth;
     const flipperY = flippers.left.y;
     const centerX = playableWidth / 2;
+    const outlaneWidth = laneGuides.outlaneWidth || 15;
 
     // === CURVED TOP SECTION ===
     // The top of the playfield is curved, allowing ball to roll horizontally
+    // Must match the drawing in drawPlayfield()
     const curveRadius = playableWidth * 0.6;
     const curveCenterY = curveRadius + 25;
 
-    if (ball.y < h * 0.12) {
+    if (ball.y < h * 0.20) {
         // Check distance from curve center
         const dx = ball.x - centerX;
         const dy = ball.y - curveCenterY;
         const distFromCenter = Math.sqrt(dx * dx + dy * dy);
 
-        if (distFromCenter > curveRadius - ball.radius && ball.y < curveCenterY) {
+        if (distFromCenter > curveRadius - ball.radius - 2 && ball.y < curveCenterY) {
             // Ball is hitting the curved top
             const nx = dx / distFromCenter;
             const ny = dy / distFromCenter;
 
             // Reflect velocity off the curve
             const dot = ball.vx * nx + ball.vy * ny;
-            ball.vx = ball.vx - 1.8 * dot * nx;
-            ball.vy = ball.vy - 1.8 * dot * ny;
+            if (dot < 0) { // Only if ball is moving toward the curve
+                ball.vx = ball.vx - 1.8 * dot * nx;
+                ball.vy = ball.vy - 1.8 * dot * ny;
 
-            // Position ball on curve
-            ball.x = centerX + nx * (curveRadius - ball.radius - 1);
-            ball.y = curveCenterY + ny * (curveRadius - ball.radius - 1);
+                // Position ball on curve
+                ball.x = centerX + nx * (curveRadius - ball.radius - 3);
+                ball.y = curveCenterY + ny * (curveRadius - ball.radius - 3);
 
-            // Apply friction for rolling along curve
-            ball.vx *= 0.95;
-            ball.vy *= 0.95;
+                // Apply friction for rolling along curve
+                ball.vx *= 0.95;
+                ball.vy *= 0.95;
+            }
         }
     }
 
-    // === LEFT WALL ===
+    // === LEFT WALL (outer boundary) ===
     if (ball.x - ball.radius < 5 && ball.y > h * 0.08) {
         ball.x = 5 + ball.radius;
         ball.vx = Math.abs(ball.vx) * physics.bounce;
@@ -397,7 +396,6 @@ function handleWallCollisions(w, h, playableWidth) {
             const eDist = Math.sqrt(edx * edx + edy * edy);
 
             if (eDist < entryCurveR + ball.radius && ball.x > plungerLaneLeft) {
-                // Guide ball around the curve
                 const enx = edx / eDist;
                 const eny = edy / eDist;
                 ball.x = entryCurveX + enx * (entryCurveR + ball.radius);
@@ -421,14 +419,14 @@ function handleWallCollisions(w, h, playableWidth) {
         }
     }
 
-    // === BALL GUIDE WALLS (from mid-field to slingshots) ===
-    const guideStartY = h * 0.48;
-    const guideEndY = flipperY - 55; // Where slingshots begin
+    // === BALL GUIDE WALLS (from mid-field down to slingshot area) ===
+    const guideStartY = h * 0.45;
+    const guideEndY = laneGuides.slingshotTopY || (flipperY - 85);
 
-    // Left guide wall - angled wall leading to left slingshot/flipper area
+    // Left guide wall
     if (ball.y > guideStartY && ball.y < guideEndY) {
         const t = (ball.y - guideStartY) / (guideEndY - guideStartY);
-        const guideX = 8 + t * (slingshots.left.points[1].x - 8);
+        const guideX = 8 + t * (outlaneWidth - 3);
 
         if (ball.x - ball.radius < guideX + 3) {
             ball.x = guideX + 3 + ball.radius;
@@ -436,10 +434,10 @@ function handleWallCollisions(w, h, playableWidth) {
         }
     }
 
-    // Right guide wall - angled wall leading to right slingshot/flipper area
+    // Right guide wall
     if (ball.y > guideStartY && ball.y < guideEndY) {
         const t = (ball.y - guideStartY) / (guideEndY - guideStartY);
-        const guideX = (playableWidth - 8) - t * ((playableWidth - 8) - slingshots.right.points[1].x);
+        const guideX = (playableWidth - 8) - t * (outlaneWidth - 3);
 
         if (ball.x + ball.radius > guideX - 3) {
             ball.x = guideX - 3 - ball.radius;
@@ -447,46 +445,57 @@ function handleWallCollisions(w, h, playableWidth) {
         }
     }
 
-    // === OUTLANE SEPARATORS ===
-    const outlaneWidth = 12;
-    const outlaneSepX_left = outlaneWidth + 3;
-    const outlaneSepX_right = playableWidth - outlaneWidth - 3;
+    // === OUTLANE GAPS (narrow passages on the outside, between outer wall and slingshot apex) ===
+    const slingshotTopY = laneGuides.slingshotTopY || (flipperY - 105);
+    const slingshotBottomY = laneGuides.slingshotBottomY || (flipperY - 50);
 
-    // Left outlane separator (wall between outlane and inlane)
-    if (ball.y > flipperY - 60 && ball.y < flipperY + 15) {
-        if (ball.x > outlaneSepX_left - 5 && ball.x < outlaneSepX_left + 15) {
-            // Coming from inlane side (right of separator)
-            if (ball.x - ball.radius < outlaneSepX_left && ball.vx < 0) {
-                ball.x = outlaneSepX_left + ball.radius;
-                ball.vx = Math.abs(ball.vx) * physics.bounce * 0.6;
-            }
+    // Left outlane - between outer wall (x=5) and outlane inner wall (x=outlaneWidth)
+    // Ball falls through this gap to drain
+    if (ball.y > slingshotTopY - 10 && ball.y < flipperY + 30 && ball.x < outlaneWidth + 3) {
+        // Ball is in the outlane area
+        // Bounce off outer wall
+        if (ball.x - ball.radius < 5) {
+            ball.x = 5 + ball.radius;
+            ball.vx = Math.abs(ball.vx) * physics.bounce;
+        }
+        // Bounce off outlane inner wall (prevents ball escaping to inlane from outlane)
+        if (ball.x + ball.radius > outlaneWidth - 2 && ball.vx > 0) {
+            ball.x = outlaneWidth - 2 - ball.radius;
+            ball.vx = -Math.abs(ball.vx) * physics.bounce * 0.5;
         }
     }
 
-    // Right outlane separator
-    if (ball.y > flipperY - 60 && ball.y < flipperY + 15) {
-        if (ball.x > outlaneSepX_right - 15 && ball.x < outlaneSepX_right + 5) {
-            // Coming from inlane side (left of separator)
-            if (ball.x + ball.radius > outlaneSepX_right && ball.vx > 0) {
-                ball.x = outlaneSepX_right - ball.radius;
-                ball.vx = -Math.abs(ball.vx) * physics.bounce * 0.6;
-            }
+    // Right outlane
+    if (ball.y > slingshotTopY - 10 && ball.y < flipperY + 30 && ball.x > playableWidth - outlaneWidth - 3) {
+        // Bounce off outer wall (playfield boundary)
+        if (ball.x + ball.radius > playableWidth - 3) {
+            ball.x = playableWidth - 3 - ball.radius;
+            ball.vx = -Math.abs(ball.vx) * physics.bounce;
         }
-    }
-
-    // === LOWER WALLS (below slingshots, channel to flippers) ===
-    // Left channel wall - guides ball from slingshot to flipper
-    if (ball.y > flipperY - 10 && ball.y < flipperY + 20 && ball.x < flippers.left.x) {
-        if (ball.x - ball.radius < outlaneSepX_left) {
-            ball.x = outlaneSepX_left + ball.radius;
+        // Bounce off outlane inner wall
+        if (ball.x - ball.radius < playableWidth - outlaneWidth + 2 && ball.vx < 0) {
+            ball.x = playableWidth - outlaneWidth + 2 + ball.radius;
             ball.vx = Math.abs(ball.vx) * physics.bounce * 0.5;
         }
     }
 
-    // Right channel wall
-    if (ball.y > flipperY - 10 && ball.y < flipperY + 20 && ball.x > flippers.right.x) {
-        if (ball.x + ball.radius > outlaneSepX_right) {
-            ball.x = outlaneSepX_right - ball.radius;
+    // === INLANE WALLS (from bottom of slingshots to flippers) ===
+    // These guide the ball from the slingshot rubber band area down to the flippers
+    if (ball.y > slingshotBottomY - 5 && ball.y < flipperY + 10) {
+        // Get slingshot rubber band X positions
+        const leftSlingshotX = slingshots.left.points.length > 0 ? slingshots.left.points[0].x : outlaneWidth + 30;
+        const rightSlingshotX = slingshots.right.points.length > 0 ? slingshots.right.points[0].x : playableWidth - outlaneWidth - 30;
+
+        // Left inlane boundary - ball shouldn't go left of the slingshot rubber band
+        if (ball.x - ball.radius < leftSlingshotX && ball.x > outlaneWidth + 5) {
+            // Guide ball toward flipper
+            ball.x = leftSlingshotX + ball.radius;
+            ball.vx = Math.abs(ball.vx) * physics.bounce * 0.5;
+        }
+
+        // Right inlane boundary
+        if (ball.x + ball.radius > rightSlingshotX && ball.x < playableWidth - outlaneWidth - 5) {
+            ball.x = rightSlingshotX - ball.radius;
             ball.vx = -Math.abs(ball.vx) * physics.bounce * 0.5;
         }
     }
@@ -496,65 +505,104 @@ function handleSlingshotCollision(slingshot) {
     const points = slingshot.points;
     if (points.length < 3) return;
 
-    // Check if ball is inside or near the triangular slingshot area
-    // Check collision with each edge of the triangle
-    for (let i = 0; i < 3; i++) {
-        const p1 = points[i];
-        const p2 = points[(i + 1) % 3];
+    // Slingshot structure (vertically oriented with long edge facing center):
+    // points[0] = top of rubber band (toward center)
+    // points[1] = bottom of rubber band (toward center)
+    // points[2] = apex (toward wall)
+    //
+    // The rubber band edge is: [0]->[1] (the long vertical edge facing center)
+    // The back edges are: [0]->[2] (top to apex) and [1]->[2] (bottom to apex)
+    //
+    // We only want the ball to bounce off the rubber band edge (facing center)
 
-        const dist = pointToLineDistance(ball.x, ball.y, p1.x, p1.y, p2.x, p2.y);
+    const playableWidth = canvas.width - plunger.width;
+    const isLeftSlingshot = points[2].x < playableWidth / 2;
 
-        if (dist < ball.radius + 4) {
-            // Calculate normal vector for this edge
-            const dx = p2.x - p1.x;
-            const dy = p2.y - p1.y;
-            const len = Math.sqrt(dx * dx + dy * dy);
+    // The rubber band is the long edge from points[0] to points[1]
+    const rubberBandEdge = { p1: points[0], p2: points[1] };
 
-            // Normal pointing outward from triangle center
-            const centerX = (points[0].x + points[1].x + points[2].x) / 3;
-            const centerY = (points[0].y + points[1].y + points[2].y) / 3;
+    const dist = pointToLineDistance(ball.x, ball.y, rubberBandEdge.p1.x, rubberBandEdge.p1.y, rubberBandEdge.p2.x, rubberBandEdge.p2.y);
 
-            let nx = -dy / len;
-            let ny = dx / len;
+    if (dist < ball.radius + 6) {
+        // Calculate edge direction (vertical)
+        const dx = rubberBandEdge.p2.x - rubberBandEdge.p1.x;
+        const dy = rubberBandEdge.p2.y - rubberBandEdge.p1.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
 
-            // Make sure normal points away from center
-            const midX = (p1.x + p2.x) / 2;
-            const midY = (p1.y + p2.y) / 2;
-            if ((midX + nx - centerX) * (midX - centerX) + (midY + ny - centerY) * (midY - centerY) < 0) {
-                nx = -nx;
-                ny = -ny;
+        // Normal vector - perpendicular to edge (pointing inward toward playfield center)
+        let nx = -dy / len;
+        let ny = dx / len;
+
+        // Make sure normal points TOWARD center of playfield (away from wall/apex)
+        // For left slingshot, normal should point right (+x)
+        // For right slingshot, normal should point left (-x)
+        if (isLeftSlingshot && nx < 0) {
+            nx = -nx;
+            ny = -ny;
+        } else if (!isLeftSlingshot && nx > 0) {
+            nx = -nx;
+            ny = -ny;
+        }
+
+        // Check if ball is approaching from the correct side (from center, toward slingshot)
+        const approachDot = ball.vx * nx + ball.vy * ny;
+        if (approachDot > 0) return; // Ball moving away from slingshot, skip
+
+        // Calculate impact velocity
+        const impactVelocity = Math.abs(approachDot);
+
+        if (impactVelocity > physics.slingThreshold) {
+            // Hard hit - slingshot activates and bounces ball toward center
+            ball.vx = nx * physics.slingForce;
+            ball.vy = ny * physics.slingForce - 4; // Slight upward bias
+
+            slingshot.active = true;
+            slingshot.timer = 8;
+            addScore(25);
+        } else {
+            // Soft hit - reflect gently
+            const dot = ball.vx * nx + ball.vy * ny;
+            ball.vx = ball.vx - 2 * dot * nx;
+            ball.vy = ball.vy - 2 * dot * ny;
+            ball.vx *= 0.75;
+            ball.vy *= 0.75;
+        }
+
+        // Move ball out of slingshot
+        ball.x += nx * (ball.radius + 8 - dist);
+        ball.y += ny * (ball.radius + 8 - dist);
+    }
+
+    // Also check back edges to prevent ball from going through
+    const backEdges = [
+        { p1: points[0], p2: points[2] }, // top to apex
+        { p1: points[1], p2: points[2] }  // bottom to apex
+    ];
+
+    for (const edge of backEdges) {
+        const edgeDist = pointToLineDistance(ball.x, ball.y, edge.p1.x, edge.p1.y, edge.p2.x, edge.p2.y);
+        if (edgeDist < ball.radius + 3) {
+            // Simple wall bounce - reflect off back edges
+            const edx = edge.p2.x - edge.p1.x;
+            const edy = edge.p2.y - edge.p1.y;
+            const elen = Math.sqrt(edx * edx + edy * edy);
+            let enx = -edy / elen;
+            let eny = edx / elen;
+
+            // Normal should point away from apex (toward playfield)
+            const toApexX = points[2].x - ball.x;
+            if (toApexX * enx > 0) {
+                enx = -enx;
+                eny = -eny;
             }
 
-            // Calculate ball velocity magnitude
-            const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
-
-            // Check if hit is hard enough to trigger slingshot bounce
-            const impactVelocity = Math.abs(ball.vx * nx + ball.vy * ny);
-
-            if (impactVelocity > physics.slingThreshold) {
-                // Hard hit - slingshot activates and bounces ball
-                ball.vx = nx * physics.slingForce;
-                ball.vy = ny * physics.slingForce - 2; // Slight upward bias
-
-                slingshot.active = true;
-                slingshot.timer = 8;
-                addScore(25);
-            } else {
-                // Soft hit - act like a wall, guide ball toward flipper
-                const dot = ball.vx * nx + ball.vy * ny;
-                ball.vx = ball.vx - 1.5 * dot * nx;
-                ball.vy = ball.vy - 1.5 * dot * ny;
-
-                // Apply some friction for soft contact
-                ball.vx *= 0.85;
-                ball.vy *= 0.85;
+            const edot = ball.vx * enx + ball.vy * eny;
+            if (edot < 0) {
+                ball.vx = ball.vx - 1.8 * edot * enx;
+                ball.vy = ball.vy - 1.8 * edot * eny;
+                ball.x += enx * (ball.radius + 3 - edgeDist);
+                ball.y += eny * (ball.radius + 3 - edgeDist);
             }
-
-            // Move ball out of slingshot
-            ball.x += nx * (ball.radius + 5 - dist);
-            ball.y += ny * (ball.radius + 5 - dist);
-
-            break;
         }
     }
 
@@ -1178,62 +1226,70 @@ function drawFlipper(flipper, isLeft) {
 
 function drawLaneGuides(playableWidth, h) {
     const flipperY = flippers.left.y;
-    const outlaneWidth = 12;
-    const outlaneSepX_left = outlaneWidth + 3;
-    const outlaneSepX_right = playableWidth - outlaneWidth - 3;
-    const guideStartY = h * 0.48;
-    const guideEndY = flipperY - 55;
+    const outlaneWidth = laneGuides.outlaneWidth || 18;
+    const slingshotTopY = laneGuides.slingshotTopY || (flipperY - 105);
+    const slingshotBottomY = laneGuides.slingshotBottomY || (flipperY - 50);
+    const guideStartY = h * 0.45;
 
     ctx.strokeStyle = '#4ecdc4';
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
 
-    // === BALL GUIDE WALLS (from mid-field to slingshots) ===
-    // Left guide wall
+    // === BALL GUIDE WALLS (from mid-field toward slingshot area) ===
+    // These guide the ball toward the slingshots
+
+    // Left guide wall - curves from outer edge toward the slingshot apex
     ctx.beginPath();
     ctx.moveTo(8, guideStartY);
-    ctx.lineTo(slingshots.left.points[1].x, guideEndY);
+    ctx.lineTo(slingshots.left.points[2].x, slingshotTopY - 5); // toward apex
     ctx.stroke();
 
     // Right guide wall
     ctx.beginPath();
     ctx.moveTo(playableWidth - 8, guideStartY);
-    ctx.lineTo(slingshots.right.points[1].x, guideEndY);
+    ctx.lineTo(slingshots.right.points[2].x, slingshotTopY - 5);
     ctx.stroke();
 
-    // === OUTLANE SEPARATORS ===
-    // Left outlane separator (between outlane and inlane)
+    // === OUTLANE CHANNEL WALLS ===
+    // Narrow outlane passages between the outer wall and the slingshot apex
+
+    // Left outlane - runs from above slingshot down to drain area
+    // The slingshot apex (points[2]) is near the wall, outlane is between wall and apex
     ctx.beginPath();
-    ctx.moveTo(outlaneSepX_left, flipperY - 60);
-    ctx.lineTo(outlaneSepX_left, flipperY + 15);
+    ctx.moveTo(outlaneWidth, slingshotTopY - 5);
+    ctx.lineTo(outlaneWidth, flipperY + 15);
     ctx.stroke();
 
-    // Right outlane separator
+    // Right outlane
     ctx.beginPath();
-    ctx.moveTo(outlaneSepX_right, flipperY - 60);
-    ctx.lineTo(outlaneSepX_right, flipperY + 15);
+    ctx.moveTo(playableWidth - outlaneWidth, slingshotTopY - 5);
+    ctx.lineTo(playableWidth - outlaneWidth, flipperY + 15);
     ctx.stroke();
 
-    // === INLANE WALLS (from slingshots to flippers) ===
-    // These connect the bottom of slingshots to near the flippers
+    // === INLANE WALLS (from bottom of rubber band to flippers) ===
+    // Guide ball from slingshot rubber band edge down to flippers
 
-    // Left inlane inner wall (from slingshot to near flipper)
-    ctx.beginPath();
-    ctx.moveTo(slingshots.left.points[0].x, slingshots.left.points[0].y);
-    ctx.lineTo(flippers.left.x - 5, flipperY + 5);
-    ctx.stroke();
+    // Left inlane - from bottom of rubber band (points[1]) toward flipper
+    if (slingshots.left.points.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(slingshots.left.points[1].x, slingshots.left.points[1].y);
+        ctx.lineTo(flippers.left.x - 5, flipperY + 5);
+        ctx.stroke();
+    }
 
-    // Right inlane inner wall
-    ctx.beginPath();
-    ctx.moveTo(slingshots.right.points[0].x, slingshots.right.points[0].y);
-    ctx.lineTo(flippers.right.x + 5, flipperY + 5);
-    ctx.stroke();
+    // Right inlane
+    if (slingshots.right.points.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(slingshots.right.points[1].x, slingshots.right.points[1].y);
+        ctx.lineTo(flippers.right.x + 5, flipperY + 5);
+        ctx.stroke();
+    }
 
     // === DRAIN AREA ===
-    ctx.fillStyle = 'rgba(231, 76, 60, 0.3)';
-    const drainLeft = flippers.left.x - 5;
-    const drainRight = flippers.right.x + 5;
-    ctx.fillRect(drainLeft, flipperY + 15, drainRight - drainLeft, 35);
+    ctx.fillStyle = 'rgba(231, 76, 60, 0.25)';
+    const drainLeft = flippers.left.x;
+    const drainRight = flippers.right.x;
+    ctx.fillRect(drainLeft, flipperY + 12, drainRight - drainLeft, 38);
 
     ctx.fillStyle = '#e74c3c';
     ctx.font = 'bold 10px Arial';
@@ -1241,10 +1297,19 @@ function drawLaneGuides(playableWidth, h) {
     ctx.fillText('DRAIN', playableWidth / 2, flipperY + 35);
 
     // === OUTLANE LABELS ===
-    ctx.fillStyle = 'rgba(231, 76, 60, 0.5)';
-    ctx.font = '8px Arial';
-    ctx.fillText('OUT', outlaneSepX_left / 2, flipperY);
-    ctx.fillText('OUT', playableWidth - outlaneSepX_left / 2, flipperY);
+    ctx.fillStyle = 'rgba(231, 76, 60, 0.6)';
+    ctx.font = 'bold 8px Arial';
+    ctx.save();
+    ctx.translate(outlaneWidth / 2, flipperY - 30);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('OUT', 0, 0);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(playableWidth - outlaneWidth / 2, flipperY - 30);
+    ctx.rotate(Math.PI / 2);
+    ctx.fillText('OUT', 0, 0);
+    ctx.restore();
 }
 
 function drawBall() {
