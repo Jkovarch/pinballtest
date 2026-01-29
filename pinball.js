@@ -4,15 +4,61 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Responsive canvas sizing - taller aspect ratio like real pinball (1:2)
+// Responsive canvas sizing - fits within available space
 function resizeCanvas() {
-    const maxWidth = Math.min(400, window.innerWidth - 20);
-    const aspectRatio = 2.0; // Taller like real pinball table
-    canvas.width = maxWidth;
-    canvas.height = maxWidth * aspectRatio;
+    const container = document.querySelector('.canvas-container');
+    const containerRect = container.getBoundingClientRect();
+
+    // Get available space
+    const availableWidth = containerRect.width - 10;
+    const availableHeight = containerRect.height - 10;
+
+    // Target aspect ratio (width:height = 1:2 for pinball)
+    const aspectRatio = 2.0;
+
+    // Calculate dimensions to fit in container while maintaining aspect ratio
+    let canvasWidth, canvasHeight;
+
+    if (availableHeight / availableWidth > aspectRatio) {
+        // Container is taller than needed - fit to width
+        canvasWidth = Math.min(availableWidth, 400);
+        canvasHeight = canvasWidth * aspectRatio;
+    } else {
+        // Container is wider than needed - fit to height
+        canvasHeight = availableHeight;
+        canvasWidth = canvasHeight / aspectRatio;
+    }
+
+    // Ensure minimum size
+    canvasWidth = Math.max(canvasWidth, 200);
+    canvasHeight = Math.max(canvasHeight, 400);
+
+    // Set canvas size
+    canvas.width = Math.floor(canvasWidth);
+    canvas.height = Math.floor(canvasHeight);
+
+    // Reinitialize game elements for new size
+    if (typeof initializeGameElements === 'function') {
+        initializeGameElements();
+    }
 }
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
+
+// Initial resize after DOM is ready
+function initCanvas() {
+    resizeCanvas();
+}
+
+// Handle resize with debounce
+let resizeTimeout;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(resizeCanvas, 100);
+});
+
+// Also handle orientation change on mobile
+window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 200);
+});
 
 // Physics settings (adjustable via settings panel)
 const physics = {
@@ -126,116 +172,120 @@ function initializeGameElements() {
     const h = canvas.height;
 
     // Plunger lane dimensions
-    const plungerLaneWidth = 35;
+    const plungerLaneWidth = 30;
     const playableWidth = w - plungerLaneWidth;
 
     plunger.x = w - plungerLaneWidth / 2;
     plunger.width = plungerLaneWidth;
 
-    // Flipper positions - centered in playable area, close together
-    const flipperY = h - 65;
-    const flipperGap = 50; // Gap between flipper pivots
-    const flipperCenterX = playableWidth / 2;
+    // Key measurements based on playable width
+    const centerX = playableWidth / 2;
+    const flipperLength = Math.min(50, playableWidth * 0.18);
+    flippers.left.length = flipperLength;
+    flippers.right.length = flipperLength;
 
-    flippers.left.x = flipperCenterX - flipperGap / 2;
+    // Flipper positions - proper spacing with drain gap between them
+    const flipperY = h - 55;
+    const drainGap = 35; // Gap between flipper tips when at rest (the drain)
+    const flipperSpread = drainGap + flipperLength * 1.6; // Distance between pivot points
+
+    flippers.left.x = centerX - flipperSpread / 2;
     flippers.left.y = flipperY;
-    flippers.right.x = flipperCenterX + flipperGap / 2;
+    flippers.right.x = centerX + flipperSpread / 2;
     flippers.right.y = flipperY;
 
-    // Slingshot positions - triangular areas above and outside each flipper
-    // Left slingshot
-    const slingshotHeight = 70;
-    const slingshotWidth = 45;
+    // Slingshot positions - triangular kickers just above and outside each flipper
+    // They form the inner walls of the inlane channels
+    const slingshotHeight = 55;
+    const slingshotWidth = 35;
+    const slingshotInset = 15; // Distance from outer wall
+
+    // Left slingshot - positioned to create inlane channel to left flipper
+    const leftSlingshotX = slingshotInset;
+    const leftSlingshotInnerX = flippers.left.x - 10;
     slingshots.left.points = [
-        { x: 25, y: flipperY - 10 },                           // Bottom (near wall)
-        { x: 25, y: flipperY - slingshotHeight },              // Top (near wall)
-        { x: 25 + slingshotWidth, y: flipperY - 10 }           // Bottom inner (near flipper)
+        { x: leftSlingshotInnerX, y: flipperY - 5 },              // Bottom inner (near flipper)
+        { x: leftSlingshotX + 5, y: flipperY - slingshotHeight }, // Top outer
+        { x: leftSlingshotX + 5, y: flipperY - 5 }                // Bottom outer (near wall)
     ];
 
-    // Right slingshot
+    // Right slingshot - positioned to create inlane channel to right flipper
+    const rightSlingshotX = playableWidth - slingshotInset;
+    const rightSlingshotInnerX = flippers.right.x + 10;
     slingshots.right.points = [
-        { x: playableWidth - 25, y: flipperY - 10 },                        // Bottom (near wall)
-        { x: playableWidth - 25, y: flipperY - slingshotHeight },           // Top (near wall)
-        { x: playableWidth - 25 - slingshotWidth, y: flipperY - 10 }        // Bottom inner (near flipper)
+        { x: rightSlingshotInnerX, y: flipperY - 5 },               // Bottom inner (near flipper)
+        { x: rightSlingshotX - 5, y: flipperY - slingshotHeight },  // Top outer
+        { x: rightSlingshotX - 5, y: flipperY - 5 }                 // Bottom outer (near wall)
     ];
 
-    // Pop bumpers - cluster in upper middle area
-    bumpers[0].x = playableWidth * 0.35;
-    bumpers[0].y = h * 0.18;
-    bumpers[0].radius = 22;
+    // Pop bumpers - cluster in upper middle area (below the curve)
+    const bumperY = h * 0.22;
+    bumpers[0].x = centerX - playableWidth * 0.18;
+    bumpers[0].y = bumperY;
+    bumpers[0].radius = Math.min(20, playableWidth * 0.08);
 
-    bumpers[1].x = playableWidth * 0.65;
-    bumpers[1].y = h * 0.18;
-    bumpers[1].radius = 22;
+    bumpers[1].x = centerX + playableWidth * 0.18;
+    bumpers[1].y = bumperY;
+    bumpers[1].radius = Math.min(20, playableWidth * 0.08);
 
-    bumpers[2].x = playableWidth * 0.5;
-    bumpers[2].y = h * 0.26;
-    bumpers[2].radius = 20;
+    bumpers[2].x = centerX;
+    bumpers[2].y = bumperY + playableWidth * 0.12;
+    bumpers[2].radius = Math.min(18, playableWidth * 0.07);
 
     // Drop targets - bank of 5 in upper area
     dropTargets.length = 0;
-    const targetStartX = playableWidth * 0.25;
-    const targetEndX = playableWidth * 0.75;
-    const targetY = h * 0.12;
+    const targetStartX = centerX - playableWidth * 0.25;
+    const targetEndX = centerX + playableWidth * 0.25;
+    const targetY = h * 0.14;
     for (let i = 0; i < 5; i++) {
         dropTargets.push({
             x: targetStartX + (targetEndX - targetStartX) * i / 4,
             y: targetY,
-            width: 6,
-            height: 25,
+            width: 5,
+            height: 20,
             active: true
         });
     }
 
     // Ramp on left side going up
-    ramp.x1 = playableWidth * 0.30;
-    ramp.y1 = h * 0.45;
-    ramp.x2 = playableWidth * 0.15;
-    ramp.y2 = h * 0.08;
+    ramp.x1 = centerX - playableWidth * 0.15;
+    ramp.y1 = h * 0.42;
+    ramp.x2 = playableWidth * 0.12;
+    ramp.y2 = h * 0.10;
 
-    // Spinner near top center
-    spinner.x = playableWidth * 0.6;
-    spinner.y = h * 0.10;
+    // Spinner near top center-right
+    spinner.x = centerX + playableWidth * 0.15;
+    spinner.y = h * 0.12;
 
     // Initialize lane guides (inlanes and outlanes)
-    initializeLaneGuides(w, h, playableWidth, flipperY);
+    initializeLaneGuides(w, h, playableWidth, flipperY, centerX);
 }
 
-function initializeLaneGuides(w, h, playableWidth, flipperY) {
+function initializeLaneGuides(w, h, playableWidth, flipperY, centerX) {
     laneGuides.length = 0;
 
-    // Outlane width - narrow to reduce draining
-    const outlaneWidth = 18;
-    const inlaneWidth = 25;
+    // Store key positions for collision detection
+    laneGuides.playableWidth = playableWidth;
+    laneGuides.flipperY = flipperY;
 
-    // Left side guide rails
-    // Outer wall curves down to outlane
-    laneGuides.push({
-        type: 'curve',
-        x1: 5, y1: h * 0.5,
-        x2: 5, y2: flipperY + 20
-    });
+    // Outlane width - narrow channel on the outside
+    const outlaneWidth = 12;
 
-    // Left outlane/inlane separator
-    laneGuides.push({
-        type: 'line',
-        x1: outlaneWidth, y1: flipperY - 80,
-        x2: outlaneWidth, y2: flipperY + 10
-    });
+    // The slingshots form the inner boundary of the inlane
+    // Outlane separators - thin walls between outlane and inlane
+    const leftOutlaneSep = outlaneWidth + 3;
+    const rightOutlaneSep = playableWidth - outlaneWidth - 3;
 
-    // Right side guide rails
-    laneGuides.push({
-        type: 'curve',
-        x1: playableWidth - 5, y1: h * 0.5,
-        x2: playableWidth - 5, y2: flipperY + 20
-    });
+    // Guide walls that channel ball from mid-field to slingshots/flippers
+    laneGuides.leftGuideTop = { x: 8, y: h * 0.50 };
+    laneGuides.leftGuideBottom = { x: slingshots.left.points[1].x, y: slingshots.left.points[1].y };
 
-    // Right outlane/inlane separator
-    laneGuides.push({
-        type: 'line',
-        x1: playableWidth - outlaneWidth, y1: flipperY - 80,
-        x2: playableWidth - outlaneWidth, y2: flipperY + 10
-    });
+    laneGuides.rightGuideTop = { x: playableWidth - 8, y: h * 0.50 };
+    laneGuides.rightGuideBottom = { x: slingshots.right.points[1].x, y: slingshots.right.points[1].y };
+
+    // Outlane separator positions
+    laneGuides.leftOutlaneSep = leftOutlaneSep;
+    laneGuides.rightOutlaneSep = rightOutlaneSep;
 }
 
 // Ball physics
@@ -289,89 +339,155 @@ function updateBall() {
 function handleWallCollisions(w, h, playableWidth) {
     const plungerLaneLeft = playableWidth;
     const flipperY = flippers.left.y;
+    const centerX = playableWidth / 2;
 
-    // Left wall
-    if (ball.x - ball.radius < 5) {
+    // === CURVED TOP SECTION ===
+    // The top of the playfield is curved, allowing ball to roll horizontally
+    const curveRadius = playableWidth * 0.6;
+    const curveCenterY = curveRadius + 25;
+
+    if (ball.y < h * 0.12) {
+        // Check distance from curve center
+        const dx = ball.x - centerX;
+        const dy = ball.y - curveCenterY;
+        const distFromCenter = Math.sqrt(dx * dx + dy * dy);
+
+        if (distFromCenter > curveRadius - ball.radius && ball.y < curveCenterY) {
+            // Ball is hitting the curved top
+            const nx = dx / distFromCenter;
+            const ny = dy / distFromCenter;
+
+            // Reflect velocity off the curve
+            const dot = ball.vx * nx + ball.vy * ny;
+            ball.vx = ball.vx - 1.8 * dot * nx;
+            ball.vy = ball.vy - 1.8 * dot * ny;
+
+            // Position ball on curve
+            ball.x = centerX + nx * (curveRadius - ball.radius - 1);
+            ball.y = curveCenterY + ny * (curveRadius - ball.radius - 1);
+
+            // Apply friction for rolling along curve
+            ball.vx *= 0.95;
+            ball.vy *= 0.95;
+        }
+    }
+
+    // === LEFT WALL ===
+    if (ball.x - ball.radius < 5 && ball.y > h * 0.08) {
         ball.x = 5 + ball.radius;
         ball.vx = Math.abs(ball.vx) * physics.bounce;
     }
 
-    // Right wall (main playfield, not in plunger lane)
-    if (ball.x < plungerLaneLeft && ball.x + ball.radius > plungerLaneLeft - 5) {
-        // Check if ball should enter plunger lane from top
-        if (ball.y < h * 0.08 && ball.vx > 0) {
-            // Allow ball to curve into plunger lane at top
-        } else {
-            ball.x = plungerLaneLeft - 5 - ball.radius;
-            ball.vx = -Math.abs(ball.vx) * physics.bounce;
+    // === RIGHT WALL (main playfield boundary) ===
+    if (ball.x < plungerLaneLeft && ball.x + ball.radius > plungerLaneLeft - 3 && ball.y > h * 0.06) {
+        ball.x = plungerLaneLeft - 3 - ball.radius;
+        ball.vx = -Math.abs(ball.vx) * physics.bounce;
+    }
+
+    // === PLUNGER LANE ===
+    if (ball.x > plungerLaneLeft - 10) {
+        // Curved entrance at top of plunger lane
+        if (ball.y < h * 0.08) {
+            const entryCurveX = plungerLaneLeft + plunger.width / 2;
+            const entryCurveY = h * 0.05;
+            const entryCurveR = plunger.width / 2 + 5;
+
+            const edx = ball.x - entryCurveX;
+            const edy = ball.y - entryCurveY;
+            const eDist = Math.sqrt(edx * edx + edy * edy);
+
+            if (eDist < entryCurveR + ball.radius && ball.x > plungerLaneLeft) {
+                // Guide ball around the curve
+                const enx = edx / eDist;
+                const eny = edy / eDist;
+                ball.x = entryCurveX + enx * (entryCurveR + ball.radius);
+                ball.y = entryCurveY + eny * (entryCurveR + ball.radius);
+                const eDot = ball.vx * enx + ball.vy * eny;
+                ball.vx -= 1.5 * eDot * enx;
+                ball.vy -= 1.5 * eDot * eny;
+            }
+        }
+
+        // Plunger lane walls
+        if (ball.x > plungerLaneLeft && ball.y > h * 0.08) {
+            if (ball.x - ball.radius < plungerLaneLeft + 2) {
+                ball.x = plungerLaneLeft + 2 + ball.radius;
+                ball.vx = Math.abs(ball.vx) * physics.bounce;
+            }
+            if (ball.x + ball.radius > w - 2) {
+                ball.x = w - 2 - ball.radius;
+                ball.vx = -Math.abs(ball.vx) * physics.bounce;
+            }
         }
     }
 
-    // Plunger lane walls
-    if (ball.x > plungerLaneLeft) {
-        // Left wall of plunger lane
-        if (ball.x - ball.radius < plungerLaneLeft + 3) {
-            ball.x = plungerLaneLeft + 3 + ball.radius;
-            ball.vx = Math.abs(ball.vx) * physics.bounce;
-        }
-        // Right wall of plunger lane
-        if (ball.x + ball.radius > w - 3) {
-            ball.x = w - 3 - ball.radius;
-            ball.vx = -Math.abs(ball.vx) * physics.bounce;
-        }
-    }
+    // === BALL GUIDE WALLS (from mid-field to slingshots) ===
+    const guideStartY = h * 0.48;
+    const guideEndY = flipperY - 55; // Where slingshots begin
 
-    // Top wall - curved at plunger lane entrance
-    if (ball.y - ball.radius < 5) {
-        ball.y = 5 + ball.radius;
-        ball.vy = Math.abs(ball.vy) * physics.bounce;
+    // Left guide wall - angled wall leading to left slingshot/flipper area
+    if (ball.y > guideStartY && ball.y < guideEndY) {
+        const t = (ball.y - guideStartY) / (guideEndY - guideStartY);
+        const guideX = 8 + t * (slingshots.left.points[1].x - 8);
 
-        // If near plunger lane entrance, guide ball left onto playfield
-        if (ball.x > plungerLaneLeft - 40) {
-            ball.vx -= 3;
+        if (ball.x - ball.radius < guideX + 3) {
+            ball.x = guideX + 3 + ball.radius;
+            ball.vx = Math.abs(ball.vx) * physics.bounce * 0.8;
         }
     }
 
-    // Outlane walls - narrow passages on sides near flippers
-    const outlaneWidth = 18;
+    // Right guide wall - angled wall leading to right slingshot/flipper area
+    if (ball.y > guideStartY && ball.y < guideEndY) {
+        const t = (ball.y - guideStartY) / (guideEndY - guideStartY);
+        const guideX = (playableWidth - 8) - t * ((playableWidth - 8) - slingshots.right.points[1].x);
 
-    // Left outlane inner wall
-    if (ball.y > flipperY - 80 && ball.y < flipperY + 20 && ball.x > outlaneWidth - 5 && ball.x < outlaneWidth + 8) {
-        if (ball.x - ball.radius < outlaneWidth + 3) {
-            // Let ball pass through to outlane
-        } else if (ball.x + ball.radius > outlaneWidth + 3) {
-            ball.x = outlaneWidth + 3 + ball.radius;
+        if (ball.x + ball.radius > guideX - 3) {
+            ball.x = guideX - 3 - ball.radius;
+            ball.vx = -Math.abs(ball.vx) * physics.bounce * 0.8;
+        }
+    }
+
+    // === OUTLANE SEPARATORS ===
+    const outlaneWidth = 12;
+    const outlaneSepX_left = outlaneWidth + 3;
+    const outlaneSepX_right = playableWidth - outlaneWidth - 3;
+
+    // Left outlane separator (wall between outlane and inlane)
+    if (ball.y > flipperY - 60 && ball.y < flipperY + 15) {
+        if (ball.x > outlaneSepX_left - 5 && ball.x < outlaneSepX_left + 15) {
+            // Coming from inlane side (right of separator)
+            if (ball.x - ball.radius < outlaneSepX_left && ball.vx < 0) {
+                ball.x = outlaneSepX_left + ball.radius;
+                ball.vx = Math.abs(ball.vx) * physics.bounce * 0.6;
+            }
+        }
+    }
+
+    // Right outlane separator
+    if (ball.y > flipperY - 60 && ball.y < flipperY + 15) {
+        if (ball.x > outlaneSepX_right - 15 && ball.x < outlaneSepX_right + 5) {
+            // Coming from inlane side (left of separator)
+            if (ball.x + ball.radius > outlaneSepX_right && ball.vx > 0) {
+                ball.x = outlaneSepX_right - ball.radius;
+                ball.vx = -Math.abs(ball.vx) * physics.bounce * 0.6;
+            }
+        }
+    }
+
+    // === LOWER WALLS (below slingshots, channel to flippers) ===
+    // Left channel wall - guides ball from slingshot to flipper
+    if (ball.y > flipperY - 10 && ball.y < flipperY + 20 && ball.x < flippers.left.x) {
+        if (ball.x - ball.radius < outlaneSepX_left) {
+            ball.x = outlaneSepX_left + ball.radius;
             ball.vx = Math.abs(ball.vx) * physics.bounce * 0.5;
         }
     }
 
-    // Right outlane inner wall
-    if (ball.y > flipperY - 80 && ball.y < flipperY + 20 &&
-        ball.x > playableWidth - outlaneWidth - 8 && ball.x < playableWidth - outlaneWidth + 5) {
-        if (ball.x + ball.radius > playableWidth - outlaneWidth - 3) {
-            // Let ball pass through to outlane
-        } else if (ball.x - ball.radius < playableWidth - outlaneWidth - 3) {
-            ball.x = playableWidth - outlaneWidth - 3 - ball.radius;
+    // Right channel wall
+    if (ball.y > flipperY - 10 && ball.y < flipperY + 20 && ball.x > flippers.right.x) {
+        if (ball.x + ball.radius > outlaneSepX_right) {
+            ball.x = outlaneSepX_right - ball.radius;
             ball.vx = -Math.abs(ball.vx) * physics.bounce * 0.5;
-        }
-    }
-
-    // Guide rails from mid-field to slingshots
-    // Left guide rail
-    if (ball.y > h * 0.5 && ball.y < flipperY - 70 && ball.x < 50) {
-        const railX = 25 + (ball.y - h * 0.5) / (flipperY - 70 - h * 0.5) * 15;
-        if (ball.x - ball.radius < railX) {
-            ball.x = railX + ball.radius;
-            ball.vx = Math.abs(ball.vx) * physics.bounce * 0.7;
-        }
-    }
-
-    // Right guide rail
-    if (ball.y > h * 0.5 && ball.y < flipperY - 70 && ball.x > playableWidth - 50) {
-        const railX = playableWidth - 25 - (ball.y - h * 0.5) / (flipperY - 70 - h * 0.5) * 15;
-        if (ball.x + ball.radius > railX) {
-            ball.x = railX - ball.radius;
-            ball.vx = -Math.abs(ball.vx) * physics.bounce * 0.7;
         }
     }
 }
@@ -728,6 +844,8 @@ function draw() {
 }
 
 function drawPlayfield(playableWidth, h) {
+    const centerX = playableWidth / 2;
+
     // Playfield background gradient
     const gradient = ctx.createLinearGradient(0, 0, 0, h);
     gradient.addColorStop(0, '#1a1a3e');
@@ -752,10 +870,46 @@ function drawPlayfield(playableWidth, h) {
         ctx.stroke();
     }
 
-    // Playfield border
+    // === CURVED TOP ===
+    const curveRadius = playableWidth * 0.6;
+    const curveCenterY = curveRadius + 25;
+
+    // Draw the curved top wall
     ctx.strokeStyle = '#4ecdc4';
-    ctx.lineWidth = 5;
-    ctx.strokeRect(2.5, 2.5, playableWidth - 5, h - 5);
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    // Arc from left side across the top to right side
+    const startAngle = Math.PI + Math.asin((curveCenterY - 5) / curveRadius);
+    const endAngle = -Math.asin((curveCenterY - 5) / curveRadius);
+    ctx.arc(centerX, curveCenterY, curveRadius, startAngle, endAngle);
+    ctx.stroke();
+
+    // Fill above the curve (outside playfield)
+    ctx.fillStyle = '#0a0a1a';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(playableWidth, 0);
+    ctx.lineTo(playableWidth, h * 0.15);
+    ctx.arc(centerX, curveCenterY, curveRadius - 2, endAngle, startAngle, true);
+    ctx.lineTo(0, h * 0.15);
+    ctx.closePath();
+    ctx.fill();
+
+    // Side walls (below the curve)
+    ctx.strokeStyle = '#4ecdc4';
+    ctx.lineWidth = 4;
+
+    // Left wall
+    ctx.beginPath();
+    ctx.moveTo(5, h * 0.10);
+    ctx.lineTo(5, h);
+    ctx.stroke();
+
+    // Right wall (up to plunger lane)
+    ctx.beginPath();
+    ctx.moveTo(playableWidth - 3, h * 0.10);
+    ctx.lineTo(playableWidth - 3, h);
+    ctx.stroke();
 }
 
 function drawPlungerLane(w, h, playableWidth) {
@@ -1024,46 +1178,73 @@ function drawFlipper(flipper, isLeft) {
 
 function drawLaneGuides(playableWidth, h) {
     const flipperY = flippers.left.y;
-    const outlaneWidth = 18;
+    const outlaneWidth = 12;
+    const outlaneSepX_left = outlaneWidth + 3;
+    const outlaneSepX_right = playableWidth - outlaneWidth - 3;
+    const guideStartY = h * 0.48;
+    const guideEndY = flipperY - 55;
 
     ctx.strokeStyle = '#4ecdc4';
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
 
-    // Left outlane separator
+    // === BALL GUIDE WALLS (from mid-field to slingshots) ===
+    // Left guide wall
     ctx.beginPath();
-    ctx.moveTo(outlaneWidth, flipperY - 80);
-    ctx.lineTo(outlaneWidth, flipperY + 15);
+    ctx.moveTo(8, guideStartY);
+    ctx.lineTo(slingshots.left.points[1].x, guideEndY);
+    ctx.stroke();
+
+    // Right guide wall
+    ctx.beginPath();
+    ctx.moveTo(playableWidth - 8, guideStartY);
+    ctx.lineTo(slingshots.right.points[1].x, guideEndY);
+    ctx.stroke();
+
+    // === OUTLANE SEPARATORS ===
+    // Left outlane separator (between outlane and inlane)
+    ctx.beginPath();
+    ctx.moveTo(outlaneSepX_left, flipperY - 60);
+    ctx.lineTo(outlaneSepX_left, flipperY + 15);
     ctx.stroke();
 
     // Right outlane separator
     ctx.beginPath();
-    ctx.moveTo(playableWidth - outlaneWidth, flipperY - 80);
-    ctx.lineTo(playableWidth - outlaneWidth, flipperY + 15);
+    ctx.moveTo(outlaneSepX_right, flipperY - 60);
+    ctx.lineTo(outlaneSepX_right, flipperY + 15);
     ctx.stroke();
 
-    // Left guide rail (from mid-field to slingshot)
+    // === INLANE WALLS (from slingshots to flippers) ===
+    // These connect the bottom of slingshots to near the flippers
+
+    // Left inlane inner wall (from slingshot to near flipper)
     ctx.beginPath();
-    ctx.moveTo(5, h * 0.45);
-    ctx.quadraticCurveTo(15, h * 0.55, 25, flipperY - 75);
+    ctx.moveTo(slingshots.left.points[0].x, slingshots.left.points[0].y);
+    ctx.lineTo(flippers.left.x - 5, flipperY + 5);
     ctx.stroke();
 
-    // Right guide rail
+    // Right inlane inner wall
     ctx.beginPath();
-    ctx.moveTo(playableWidth - 5, h * 0.45);
-    ctx.quadraticCurveTo(playableWidth - 15, h * 0.55, playableWidth - 25, flipperY - 75);
+    ctx.moveTo(slingshots.right.points[0].x, slingshots.right.points[0].y);
+    ctx.lineTo(flippers.right.x + 5, flipperY + 5);
     ctx.stroke();
 
-    // Drain area indicator
+    // === DRAIN AREA ===
     ctx.fillStyle = 'rgba(231, 76, 60, 0.3)';
-    const drainLeft = outlaneWidth + 10;
-    const drainRight = playableWidth - outlaneWidth - 10;
-    ctx.fillRect(drainLeft, flipperY + 25, drainRight - drainLeft, 35);
+    const drainLeft = flippers.left.x - 5;
+    const drainRight = flippers.right.x + 5;
+    ctx.fillRect(drainLeft, flipperY + 15, drainRight - drainLeft, 35);
 
     ctx.fillStyle = '#e74c3c';
     ctx.font = 'bold 10px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('DRAIN', playableWidth / 2, flipperY + 45);
+    ctx.fillText('DRAIN', playableWidth / 2, flipperY + 35);
+
+    // === OUTLANE LABELS ===
+    ctx.fillStyle = 'rgba(231, 76, 60, 0.5)';
+    ctx.font = '8px Arial';
+    ctx.fillText('OUT', outlaneSepX_left / 2, flipperY);
+    ctx.fillText('OUT', playableWidth - outlaneSepX_left / 2, flipperY);
 }
 
 function drawBall() {
@@ -1098,11 +1279,20 @@ function drawBall() {
 function drawLaunchIndicator(w, h) {
     const playableWidth = w - plunger.width;
 
-    ctx.fillStyle = 'rgba(78, 205, 196, 0.7)';
-    ctx.font = 'bold 12px Arial';
+    ctx.fillStyle = 'rgba(78, 205, 196, 0.9)';
+    ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('Press SPACE', playableWidth / 2, h / 2 - 10);
-    ctx.fillText('to launch!', playableWidth / 2, h / 2 + 10);
+
+    // Check if touch device
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+    if (isTouchDevice) {
+        ctx.fillText('Tap GO!', playableWidth / 2, h / 2 - 10);
+        ctx.fillText('to launch', playableWidth / 2, h / 2 + 10);
+    } else {
+        ctx.fillText('Press SPACE', playableWidth / 2, h / 2 - 10);
+        ctx.fillText('to launch!', playableWidth / 2, h / 2 + 10);
+    }
 
     // Blinking ball in plunger lane
     const blink = Math.sin(Date.now() / 200) > 0;
@@ -1143,44 +1333,73 @@ document.addEventListener('keyup', (e) => {
     }
 });
 
-// Touch controls
+// Touch controls with improved mobile handling
 const touchLeft = document.getElementById('touchLeft');
 const touchRight = document.getElementById('touchRight');
 const touchLaunch = document.getElementById('touchLaunch');
 
-touchLeft.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    flippers.left.active = true;
-});
-touchLeft.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    flippers.left.active = false;
-});
+// Helper function to handle touch events properly
+function setupTouchButton(button, onStart, onEnd) {
+    // Touch events
+    button.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        button.classList.add('pressed');
+        onStart();
+    }, { passive: false });
 
-touchRight.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    flippers.right.active = true;
-});
-touchRight.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    flippers.right.active = false;
-});
+    button.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        button.classList.remove('pressed');
+        if (onEnd) onEnd();
+    }, { passive: false });
 
-touchLaunch.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    launchBall();
-});
+    button.addEventListener('touchcancel', (e) => {
+        e.preventDefault();
+        button.classList.remove('pressed');
+        if (onEnd) onEnd();
+    }, { passive: false });
 
-// Mouse fallback for touch buttons
-touchLeft.addEventListener('mousedown', () => flippers.left.active = true);
-touchLeft.addEventListener('mouseup', () => flippers.left.active = false);
-touchLeft.addEventListener('mouseleave', () => flippers.left.active = false);
+    // Mouse events for desktop testing
+    button.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        button.classList.add('pressed');
+        onStart();
+    });
 
-touchRight.addEventListener('mousedown', () => flippers.right.active = true);
-touchRight.addEventListener('mouseup', () => flippers.right.active = false);
-touchRight.addEventListener('mouseleave', () => flippers.right.active = false);
+    button.addEventListener('mouseup', (e) => {
+        e.preventDefault();
+        button.classList.remove('pressed');
+        if (onEnd) onEnd();
+    });
 
-touchLaunch.addEventListener('click', launchBall);
+    button.addEventListener('mouseleave', () => {
+        button.classList.remove('pressed');
+        if (onEnd) onEnd();
+    });
+}
+
+// Setup flipper controls
+setupTouchButton(touchLeft,
+    () => { flippers.left.active = true; },
+    () => { flippers.left.active = false; }
+);
+
+setupTouchButton(touchRight,
+    () => { flippers.right.active = true; },
+    () => { flippers.right.active = false; }
+);
+
+// Launch button - only needs start action
+setupTouchButton(touchLaunch,
+    () => { launchBall(); },
+    null
+);
+
+// Prevent default touch behaviors on canvas
+canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
 // Button controls
 document.getElementById('launchBtn').addEventListener('click', launchBall);
@@ -1194,6 +1413,14 @@ const resetSettings = document.getElementById('resetSettings');
 settingsBtn.addEventListener('click', () => {
     settingsModal.classList.add('active');
 });
+
+// Mobile settings button
+const mobileSettingsBtn = document.getElementById('mobileSettingsBtn');
+if (mobileSettingsBtn) {
+    mobileSettingsBtn.addEventListener('click', () => {
+        settingsModal.classList.add('active');
+    });
+}
 
 closeSettings.addEventListener('click', () => {
     settingsModal.classList.remove('active');
@@ -1272,12 +1499,6 @@ sliders.friction.addEventListener('input', (e) => {
 // Initialize settings UI
 updateSettingsUI();
 
-// Handle canvas resize
-window.addEventListener('resize', () => {
-    resizeCanvas();
-    initializeGameElements();
-});
-
 // Game loop
 function gameLoop() {
     updateBall();
@@ -1287,10 +1508,22 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
-// Initialize and start
-initializeGameElements();
-document.getElementById('highScore').textContent = gameState.highScore;
-gameLoop();
+// Initialize and start the game
+function startGame() {
+    // Wait for DOM to be fully ready
+    resizeCanvas();
+    initializeGameElements();
+    document.getElementById('highScore').textContent = gameState.highScore;
+    gameLoop();
+}
+
+// Start when document is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startGame);
+} else {
+    // Small delay to ensure layout is complete
+    setTimeout(startGame, 50);
+}
 
 // Close modal when clicking outside
 settingsModal.addEventListener('click', (e) => {
@@ -1298,3 +1531,13 @@ settingsModal.addEventListener('click', (e) => {
         settingsModal.classList.remove('active');
     }
 });
+
+// Prevent zoom on double tap for iOS
+document.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    if (now - lastTouchEnd <= 300) {
+        e.preventDefault();
+    }
+    lastTouchEnd = now;
+}, { passive: false });
+let lastTouchEnd = 0;
