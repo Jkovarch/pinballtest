@@ -27,51 +27,6 @@
             background: #0a0a12;
         }
 
-        /* Visual feedback for touches */
-        .touch-indicator {
-            position: fixed;
-            bottom: 20px;
-            padding: 15px 30px;
-            font-family: 'Arial', sans-serif;
-            font-size: 14px;
-            font-weight: bold;
-            color: #fff;
-            border-radius: 25px;
-            opacity: 0.3;
-            transition: opacity 0.1s, transform 0.1s;
-            pointer-events: none;
-            z-index: 5;
-        }
-
-        .touch-indicator.active {
-            opacity: 1;
-            transform: scale(1.1);
-        }
-
-        #leftIndicator {
-            left: 20px;
-            background: linear-gradient(135deg, #ff00ff, #ff0080);
-            box-shadow: 0 0 20px #ff00ff;
-        }
-
-        #rightIndicator {
-            right: 20px;
-            background: linear-gradient(135deg, #00ffff, #0080ff);
-            box-shadow: 0 0 20px #00ffff;
-        }
-
-        #launchIndicator {
-            left: 50%;
-            transform: translateX(-50%);
-            bottom: 80px;
-            background: linear-gradient(135deg, #00ff00, #80ff00);
-            box-shadow: 0 0 20px #00ff00;
-        }
-
-        #launchIndicator.active {
-            transform: translateX(-50%) scale(1.1);
-        }
-
         /* HUD */
         #hud {
             position: fixed;
@@ -95,12 +50,10 @@
 
         #scoreDisplay {
             border-color: #ff00ff;
-            text-shadow: 0 0 10px #ff00ff;
         }
 
         #ballDisplay {
             border-color: #00ffff;
-            text-shadow: 0 0 10px #00ffff;
         }
 
         /* Instructions overlay */
@@ -125,7 +78,6 @@
         #instructions h1 {
             font-size: 2.5em;
             color: #ff00ff;
-            text-shadow: 0 0 20px #ff00ff, 0 0 40px #ff00ff;
             margin-bottom: 20px;
             letter-spacing: 5px;
         }
@@ -134,7 +86,6 @@
             font-size: 1em;
             margin: 10px 0;
             color: #00ffff;
-            text-shadow: 0 0 10px #00ffff;
         }
 
         .key {
@@ -150,11 +101,6 @@
 <body>
     <canvas id="gameCanvas"></canvas>
 
-    <!-- Visual indicators -->
-    <div id="leftIndicator" class="touch-indicator">LEFT</div>
-    <div id="rightIndicator" class="touch-indicator">RIGHT</div>
-    <div id="launchIndicator" class="touch-indicator">LAUNCH</div>
-
     <!-- HUD -->
     <div id="hud">
         <div id="scoreDisplay" class="hud-item">SCORE: <span id="score">0</span></div>
@@ -166,7 +112,7 @@
         <h1>NEON PINBALL</h1>
         <p>Keyboard: <span class="key">Z</span> Left <span class="key">X</span> Right <span class="key">C</span> Launch</p>
         <p>Touch: Left/Right sides for flippers</p>
-        <p>Center bottom to launch</p>
+        <p>Swipe down to pull and release launcher</p>
     </div>
 
     <script>
@@ -180,21 +126,22 @@
     const ctx = canvas.getContext('2d');
 
     // === CONSTANTS ===
-    const TABLE_WIDTH = 500;
-    const TABLE_HEIGHT = 800;
-    const CENTER_X = TABLE_WIDTH / 2;
-    const BALL_RADIUS = 8;
-    const WALL_RADIUS = 6;
-    const DOME_RADIUS = 180;
-    const FLIPPER_RADIUS = 12;
-    const FLIPPER_SEGMENTS = 50;
-    const FLIPPER_SPREAD = 65;
-    const FLIPPER_Y = TABLE_HEIGHT - 60;
-    const SHOOTER_Y = TABLE_HEIGHT - 60;
+    const TABLE_WIDTH = 400;
+    const TABLE_HEIGHT = 700;
+    const CENTER_X = TABLE_WIDTH / 2 - 20; // Shift left for shooter lane
+    const BALL_RADIUS = 7;
+    const WALL_RADIUS = 5;
+    const DOME_RADIUS = 150;
+    const FLIPPER_RADIUS = 10;
+    const FLIPPER_SEGMENTS = 45;
+    const FLIPPER_SPREAD = 55; // Distance from center to flipper pivot
+    const FLIPPER_Y = TABLE_HEIGHT - 35;
+    const SHOOTER_X = CENTER_X + DOME_RADIUS - BALL_RADIUS; // Shooter at right edge of dome
+    const SHOOTER_Y = TABLE_HEIGHT - 50;
     const RESTITUTION = 1.3;
-    const BUMPER_RESTITUTION = 1.8;
-    const PHYSICS_SUBSTEPS = 8;
-    const GRAVITY = 0.002;
+    const BUMPER_RESTITUTION = 1.7;
+    const PHYSICS_SUBSTEPS = 9;
+    const GRAVITY = 0.0017;
 
     // Object types
     const TYPE_WALL = 0;
@@ -210,10 +157,14 @@
     let offsetX = 0;
     let offsetY = 0;
 
-    // Flipper angles
-    let flipperLeft = 1;
-    let flipperRight = 1;
+    // Flipper angles - match Lu1ky: starts at 1 (down), goes to -1 (up) when pressed
+    let flipperLeft = 1;   // Rest position (down, ~28 degrees)
+    let flipperRight = 1;  // Rest position (down, ~28 degrees)
     let keys = { z: false, x: false, c: false };
+
+    // Swipe detection for launcher
+    let swipeStartY = 0;
+    let isSwiping = false;
 
     // === OBJECT CREATION ===
     function createObject(x, y, type = TYPE_WALL, radius = WALL_RADIUS) {
@@ -234,88 +185,109 @@
     function buildTable() {
         objects = [];
 
-        // Ball (index 0)
-        const ball = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS - 15, FLIPPER_Y - 30);
+        // Ball (index 0) - starts in shooter lane
+        const ball = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS, FLIPPER_Y - 20);
         ball.radius = BALL_RADIUS;
         ball.color = '#ffffff';
         ball.isBall = true;
 
-        // Flipper segments (left: 1-50, right: 51-100)
+        // Flipper segments (left: 1-45, right: 46-90)
         for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
             createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
             createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
         }
 
-        // Shooter segments (101-150)
-        for (let i = 0; i < 50; i++) {
-            const shooter = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS - 15, SHOOTER_Y + i, TYPE_WALL, 5);
+        // Shooter segments - matching Lu1ky placement
+        for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+            const shooter = createObject(
+                CENTER_X + DOME_RADIUS - BALL_RADIUS,
+                TABLE_HEIGHT - 10 + i,
+                TYPE_WALL, 5
+            );
             shooter.isShooter = true;
             shooter.shooterIndex = i;
         }
 
-        // Build symmetric elements
+        // Build symmetric elements - matching Lu1ky structure
+        const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS;
+        const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
+
         for (let side = 0; side < 2; side++) {
-            const dir = side * 2 - 1;
+            const dir = side * 2 - 1; // -1 for left, 1 for right
 
-            // Bottom drain pins
-            createObject(CENTER_X + dir * (FLIPPER_SPREAD + 10), FLIPPER_Y + 40);
+            // Bottom drain pin
+            createObject(FLIPPER_CENTER, FLIPPER_Y + 40);
 
-            // Main bumpers (clover pattern)
-            const bumperY = 200;
-            createObject(CENTER_X, bumperY, TYPE_BUMPER, 20);
-            createObject(CENTER_X + dir * 50, bumperY - 50, TYPE_BUMPER, 35);
-            createObject(CENTER_X + dir * 50, bumperY + 50, TYPE_BUMPER, 35);
-
-            // Side bumpers
-            createObject(CENTER_X + dir * 160, DOME_RADIUS + 80, TYPE_BUMPER, 50);
-
-            // Side walls
+            // Side walls - full height
             for (let i = 0; i < 90; i++) {
-                createObject(CENTER_X + dir * (DOME_RADIUS + WALL_RADIUS), TABLE_HEIGHT - 8 * i);
+                createObject(CENTER_X + dir * DOME_BOTH, TABLE_HEIGHT - 7 * i);
             }
 
-            // Safety bumpers near flippers
-            createObject(CENTER_X + dir * 145, FLIPPER_Y - 180, TYPE_BUMPER, 12);
-
-            // Shooter lane wall
-            if (side === 1) {
-                for (let i = 0; i < 50; i++) {
-                    createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS - 5, TABLE_HEIGHT - 8 * i);
-                }
-            }
-
-            // Top dome arc
-            for (let i = 0; i < 50; i++) {
-                const angle = i / 32;
+            // Top dome arc - extends fully, covering shooter lane entrance
+            // This is the KEY fix: the arc curves over the top of the shooter lane
+            for (let i = 0; i < 55; i++) {
                 createObject(
-                    CENTER_X + dir * (DOME_RADIUS + WALL_RADIUS) * Math.cos(angle),
-                    (DOME_RADIUS + WALL_RADIUS) - (DOME_RADIUS + WALL_RADIUS) * Math.sin(angle)
+                    CENTER_X + dir * DOME_BOTH * Math.cos(i / 35),
+                    DOME_BOTH - DOME_BOTH * Math.sin(i / 35)
                 );
             }
 
-            // Flipper lane walls
+            // Flipper lane side walls
             for (let i = 0; i < 15; i++) {
-                createObject(CENTER_X + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50 - i * 8);
-                createObject(CENTER_X + dir * (FLIPPER_SPREAD + 55 - i * 3), FLIPPER_Y - 50 + i * 4);
+                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55),
+                    FLIPPER_Y - 50 - i * 7);
+            }
+
+            // Flipper lane bottom angled walls
+            for (let i = 0; i < 15; i++) {
+                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55 - i * 3),
+                    FLIPPER_Y - 50 + i * 3);
             }
 
             // Slingshots
             for (let i = 0; i < 15; i++) {
                 createObject(
-                    CENTER_X + dir * (FLIPPER_SPREAD + 15 + i),
+                    FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 15 + i),
                     FLIPPER_Y - 55 - i * 3,
                     TYPE_BUMPER, 4
                 );
             }
+        }
 
-            // Small bumper grid
+        // === BUMPERS ===
+
+        // Score bumpers - clover pattern (matching Lu1ky)
+        const bumperY = 160;
+        createObject(CENTER_X, bumperY, TYPE_BUMPER, 12);
+        createObject(CENTER_X - 45, bumperY - 45, TYPE_BUMPER, 30);
+        createObject(CENTER_X + 45, bumperY - 45, TYPE_BUMPER, 30);
+        createObject(CENTER_X - 45, bumperY + 45, TYPE_BUMPER, 30);
+        createObject(CENTER_X + 45, bumperY + 45, TYPE_BUMPER, 30);
+
+        // Side bumpers
+        createObject(FLIPPER_CENTER - 150, DOME_RADIUS + 90, TYPE_BUMPER, 45);
+        createObject(FLIPPER_CENTER + 150, DOME_RADIUS + 90, TYPE_BUMPER, 45);
+
+        // Safety bumpers near outlanes - bigger to help protect
+        createObject(FLIPPER_CENTER - 130, FLIPPER_Y - 160, TYPE_BUMPER, 12);
+        createObject(FLIPPER_CENTER + 130, FLIPPER_Y - 160, TYPE_BUMPER, 12);
+
+        // Bumper grid
+        for (let side = 0; side < 2; side++) {
+            const dir = side * 2 - 1;
             for (let i = 0; i < 15; i++) {
                 createObject(
-                    CENTER_X + (i % 3) * 20 * dir,
-                    320 - (i % 7) * 18,
+                    CENTER_X + (i % 3) * 18 * dir,
+                    bumperY + 200 - (i % 7) * 16,
                     TYPE_BUMPER, 4
                 );
             }
+        }
+
+        // Shooter lane inner wall - stops before top so dome arc covers entrance
+        const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
+        for (let i = 0; i < 55; i++) {
+            createObject(shooterWallX, TABLE_HEIGHT - 7 * i);
         }
     }
 
@@ -324,53 +296,51 @@
         const ball = objects[0];
 
         for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep++) {
-            // Update flipper angles
-            if (keys.z) {
-                flipperLeft = Math.max(-1, flipperLeft - 0.08);
-            } else {
-                flipperLeft = Math.min(1, flipperLeft + 0.06);
-            }
+            // Update flipper angles - EXACTLY matching Lu1ky
+            // At rest: angle = 1, sin(0.5)>0 = flippers point DOWN
+            // Pressed: angle = -1, sin(-0.5)<0 = flippers point UP
+            const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS;
 
-            if (keys.x) {
-                flipperRight = Math.max(-1, flipperRight - 0.08);
-            } else {
-                flipperRight = Math.min(1, flipperRight + 0.06);
-            }
+            flipperLeft = Math.max(-1, Math.min(1,
+                flipperLeft + (keys.z ? -0.07 : 0.05)));
 
-            // Update flipper segment positions
+            flipperRight = Math.max(-1, Math.min(1,
+                flipperRight + (keys.x ? -0.07 : 0.05)));
+
+            // Update flipper segment positions - Lu1ky formula
             for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
-                // Left flipper
+                // Left flipper (s=0, dir=-1)
                 const leftObj = objects[1 + i];
                 const prevLeftX = leftObj.x;
                 const prevLeftY = leftObj.y;
-                leftObj.x = CENTER_X - FLIPPER_SPREAD + i * Math.cos(flipperLeft / 2);
-                leftObj.y = FLIPPER_Y - i * Math.sin(flipperLeft / 2);
+                leftObj.x = FLIPPER_CENTER + (-1) * (FLIPPER_SPREAD - i * Math.cos(flipperLeft / 2));
+                leftObj.y = FLIPPER_Y + i * Math.sin(flipperLeft / 2);
                 leftObj.vx = leftObj.x - prevLeftX;
                 leftObj.vy = leftObj.y - prevLeftY;
-                leftObj.radius = FLIPPER_RADIUS - i / 6;
+                leftObj.radius = FLIPPER_RADIUS - i / 7;
 
-                // Right flipper
+                // Right flipper (s=1, dir=+1)
                 const rightObj = objects[1 + FLIPPER_SEGMENTS + i];
                 const prevRightX = rightObj.x;
                 const prevRightY = rightObj.y;
-                rightObj.x = CENTER_X + FLIPPER_SPREAD - i * Math.cos(flipperRight / 2);
-                rightObj.y = FLIPPER_Y - i * Math.sin(flipperRight / 2);
+                rightObj.x = FLIPPER_CENTER + (1) * (FLIPPER_SPREAD - i * Math.cos(flipperRight / 2));
+                rightObj.y = FLIPPER_Y + i * Math.sin(flipperRight / 2);
                 rightObj.vx = rightObj.x - prevRightX;
                 rightObj.vy = rightObj.y - prevRightY;
-                rightObj.radius = FLIPPER_RADIUS - i / 6;
+                rightObj.radius = FLIPPER_RADIUS - i / 7;
             }
 
-            // Update shooter
+            // Update shooter - Lu1ky style spring physics
             const shooterStart = 1 + FLIPPER_SEGMENTS * 2;
-            for (let i = 0; i < 50; i++) {
+            const SHOOTER_MAX = TABLE_HEIGHT - 10;
+            for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
                 const shooter = objects[shooterStart + i];
                 if (shooter && shooter.isShooter) {
-                    const targetY = keys.c ?
-                        SHOOTER_Y + 30 + i :
-                        SHOOTER_Y + i;
-
                     const prevY = shooter.y;
-                    shooter.y += (targetY - shooter.y) * (keys.c ? 0.02 : 0.15);
+                    // Clamp position, apply spring physics
+                    shooter.y = Math.min(SHOOTER_MAX + i,
+                        shooter.y + (shooter.vy = keys.c ? 0.05 :
+                        (SHOOTER_Y + i - shooter.y) / 19));
                     shooter.vy = shooter.y - prevY;
                 }
             }
@@ -381,15 +351,15 @@
             ball.vy += GRAVITY;
 
             // Check if ball is lost
-            if (ball.y > TABLE_HEIGHT + 100) {
+            if (ball.y > TABLE_HEIGHT + 50) {
                 if (ballCount > 0) {
                     ballCount--;
                     document.getElementById('balls').textContent = ballCount;
 
                     if (ballCount > 0) {
-                        // Respawn ball
-                        ball.x = CENTER_X + DOME_RADIUS - BALL_RADIUS - 15;
-                        ball.y = FLIPPER_Y - 30;
+                        // Respawn ball in shooter lane
+                        ball.x = CENTER_X + DOME_RADIUS - BALL_RADIUS;
+                        ball.y = FLIPPER_Y - 20;
                         ball.vx = 0;
                         ball.vy = 0;
                     } else {
@@ -400,8 +370,8 @@
                             ballCount = 3;
                             document.getElementById('score').textContent = score;
                             document.getElementById('balls').textContent = ballCount;
-                            ball.x = CENTER_X + DOME_RADIUS - BALL_RADIUS - 15;
-                            ball.y = FLIPPER_Y - 30;
+                            ball.x = SHOOTER_X;
+                            ball.y = SHOOTER_Y - 40;
                             ball.vx = 0;
                             ball.vy = 0;
                             gameStarted = false;
@@ -436,7 +406,7 @@
                         if (obj.type === TYPE_BUMPER && !obj.bounce) {
                             obj.bounce = 10;
 
-                            if (obj.y < FLIPPER_Y - 100) {
+                            if (obj.y < FLIPPER_Y - 80) {
                                 score++;
                                 document.getElementById('score').textContent = score;
 
@@ -465,24 +435,18 @@
         }
     }
 
-    // === NEON DRAWING ===
-    function drawNeonCircle(x, y, radius, color, glowSize = 1) {
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 15 * glowSize;
-
+    // === DRAWING ===
+    function drawCircle(x, y, radius, color) {
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = '#ffffff';
-        ctx.globalAlpha = 0.6;
+        // Subtle highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.beginPath();
-        ctx.arc(x, y, radius * 0.4, 0, Math.PI * 2);
+        ctx.arc(x - radius * 0.2, y - radius * 0.2, radius * 0.3, 0, Math.PI * 2);
         ctx.fill();
-        ctx.globalAlpha = 1;
-
-        ctx.shadowBlur = 0;
     }
 
     function draw() {
@@ -496,71 +460,67 @@
         // Draw background grid
         ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)';
         ctx.lineWidth = 1;
-        for (let x = 0; x < TABLE_WIDTH; x += 30) {
+        for (let x = 0; x < TABLE_WIDTH; x += 25) {
             ctx.beginPath();
             ctx.moveTo(x, 0);
             ctx.lineTo(x, TABLE_HEIGHT);
             ctx.stroke();
         }
-        for (let y = 0; y < TABLE_HEIGHT; y += 30) {
+        for (let y = 0; y < TABLE_HEIGHT; y += 25) {
             ctx.beginPath();
             ctx.moveTo(0, y);
             ctx.lineTo(TABLE_WIDTH, y);
             ctx.stroke();
         }
 
-        // Draw neon border
+        // Draw border
         ctx.strokeStyle = '#00ffff';
-        ctx.shadowColor = '#00ffff';
-        ctx.shadowBlur = 20;
         ctx.lineWidth = 3;
         ctx.strokeRect(5, 5, TABLE_WIDTH - 10, TABLE_HEIGHT - 10);
-        ctx.shadowBlur = 0;
 
         // Draw all objects
         for (let i = objects.length - 1; i >= 0; i--) {
             const obj = objects[i];
 
             let color = obj.color;
-            let glowSize = 1;
 
             if (obj.bounce > 0) {
                 color = '#ffffff';
-                glowSize = 1 + obj.bounce / 5;
             }
 
+            // Left flipper coloring
             if (i >= 1 && i <= FLIPPER_SEGMENTS) {
                 color = keys.z ? '#ff00ff' : '#ff0080';
-            } else if (i > FLIPPER_SEGMENTS && i <= FLIPPER_SEGMENTS * 2) {
+            }
+            // Right flipper coloring
+            else if (i > FLIPPER_SEGMENTS && i <= FLIPPER_SEGMENTS * 2) {
                 color = keys.x ? '#00ffff' : '#0080ff';
             }
 
+            // Shooter coloring
             if (obj.isShooter) {
-                color = keys.c ? '#00ff00' : '#008800';
+                color = '#00aa00';
             }
 
+            // Ball
             if (obj.isBall) {
                 // Ball trail
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
                 ctx.beginPath();
                 ctx.arc(obj.x - obj.vx * 3, obj.y - obj.vy * 3, obj.radius * 0.8, 0, Math.PI * 2);
                 ctx.fill();
 
                 color = '#ffffff';
-                glowSize = 2;
             }
 
-            drawNeonCircle(obj.x, obj.y, obj.radius + (obj.bounce || 0), color, glowSize);
+            drawCircle(obj.x, obj.y, obj.radius + (obj.bounce || 0), color);
         }
 
         // Score display in table
         ctx.fillStyle = '#ff00ff';
-        ctx.shadowColor = '#ff00ff';
-        ctx.shadowBlur = 10;
-        ctx.font = 'bold 16px Arial';
+        ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'left';
-        ctx.fillText('SCORE: ' + score, 30, TABLE_HEIGHT - 20);
-        ctx.shadowBlur = 0;
+        ctx.fillText('SCORE: ' + score, 15, TABLE_HEIGHT - 12);
 
         ctx.restore();
 
@@ -616,11 +576,7 @@
         if (e.key === 'c' || e.key === 'C') keys.c = false;
     });
 
-    // Touch controls
-    const leftIndicator = document.getElementById('leftIndicator');
-    const rightIndicator = document.getElementById('rightIndicator');
-    const launchIndicator = document.getElementById('launchIndicator');
-
+    // === TOUCH CONTROLS (invisible zones) ===
     document.body.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
     document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
@@ -631,82 +587,86 @@
             const x = touch.clientX;
             const y = touch.clientY;
             const width = window.innerWidth;
-            const height = window.innerHeight;
 
-            if (x < width * 0.4) {
-                activeTouches.set(touch.identifier, 'left');
+            // Left half = left flipper
+            if (x < width * 0.5) {
+                activeTouches.set(touch.identifier, { zone: 'left', startY: y });
                 keys.z = true;
-                leftIndicator.classList.add('active');
-            } else if (x > width * 0.6) {
-                activeTouches.set(touch.identifier, 'right');
+            }
+            // Right half = right flipper OR launcher (swipe down)
+            else {
+                activeTouches.set(touch.identifier, { zone: 'right', startY: y });
                 keys.x = true;
-                rightIndicator.classList.add('active');
-            } else if (y > height * 0.7) {
-                activeTouches.set(touch.identifier, 'launch');
-                keys.c = true;
-                launchIndicator.classList.add('active');
+            }
+        }
+    }
+
+    function handleTouchMove(e) {
+        for (let touch of e.changedTouches) {
+            const touchData = activeTouches.get(touch.identifier);
+            if (touchData && touchData.zone === 'right') {
+                const deltaY = touch.clientY - touchData.startY;
+                // If swiping down more than 30px, activate launcher
+                if (deltaY > 30) {
+                    keys.c = true;
+                    touchData.swiping = true;
+                }
             }
         }
     }
 
     function handleTouchEnd(e) {
         for (let touch of e.changedTouches) {
-            const zone = activeTouches.get(touch.identifier);
+            const touchData = activeTouches.get(touch.identifier);
             activeTouches.delete(touch.identifier);
 
-            let stillLeft = false, stillRight = false, stillLaunch = false;
-            for (let [id, z] of activeTouches) {
-                if (z === 'left') stillLeft = true;
-                if (z === 'right') stillRight = true;
-                if (z === 'launch') stillLaunch = true;
+            // Check remaining touches
+            let stillLeft = false, stillRight = false;
+            for (let [id, data] of activeTouches) {
+                if (data.zone === 'left') stillLeft = true;
+                if (data.zone === 'right') stillRight = true;
             }
 
-            if (!stillLeft) {
-                keys.z = false;
-                leftIndicator.classList.remove('active');
-            }
-            if (!stillRight) {
-                keys.x = false;
-                rightIndicator.classList.remove('active');
-            }
-            if (!stillLaunch) {
+            if (!stillLeft) keys.z = false;
+            if (!stillRight) keys.x = false;
+
+            // Release launcher if was swiping
+            if (touchData && touchData.swiping) {
                 keys.c = false;
-                launchIndicator.classList.remove('active');
             }
         }
     }
 
     document.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
     document.addEventListener('touchend', handleTouchEnd, { passive: false });
     document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
-    // Mouse fallback
+    // Mouse fallback (for desktop testing)
     canvas.addEventListener('mousedown', (e) => {
         const x = e.clientX;
         const width = window.innerWidth;
 
-        if (e.button === 0) {
-            if (x < width * 0.4) {
+        if (e.button === 0) { // Left click
+            if (x < width * 0.5) {
                 keys.z = true;
-                leftIndicator.classList.add('active');
-            } else if (x > width * 0.6) {
-                keys.c = true;
-                launchIndicator.classList.add('active');
+            } else {
+                keys.x = true;
             }
         }
-        if (e.button === 2) {
-            keys.x = true;
-            rightIndicator.classList.add('active');
+        if (e.button === 2) { // Right click = launcher
+            keys.c = true;
         }
     });
 
     canvas.addEventListener('mouseup', (e) => {
-        keys.z = false;
-        keys.x = false;
-        keys.c = false;
-        leftIndicator.classList.remove('active');
-        rightIndicator.classList.remove('active');
-        launchIndicator.classList.remove('active');
+        if (e.button === 0) {
+            keys.z = false;
+            keys.x = false;
+        }
+        if (e.button === 2) {
+            keys.c = false;
+        }
     });
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
