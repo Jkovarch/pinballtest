@@ -128,14 +128,14 @@
     // === CONSTANTS ===
     const TABLE_WIDTH = 400;
     const TABLE_HEIGHT = 700;
-    const CENTER_X = TABLE_WIDTH / 2 - 20; // Shift left to make room for shooter lane
+    const CENTER_X = TABLE_WIDTH / 2 - 15; // Shift left to make room for shooter lane
     const BALL_RADIUS = 7;
     const WALL_RADIUS = 5;
-    const DOME_RADIUS = 150;
+    const DOME_RADIUS = 140;
     const FLIPPER_RADIUS = 10;
     const FLIPPER_SEGMENTS = 45;
-    const FLIPPER_SPREAD = 50;
-    const FLIPPER_Y = TABLE_HEIGHT - 35; // Lower flippers
+    const FLIPPER_SPREAD = 70; // WIDER spread for drain gap
+    const FLIPPER_Y = TABLE_HEIGHT - 40;
     const SHOOTER_X = TABLE_WIDTH - 25;
     const SHOOTER_Y = TABLE_HEIGHT - 50;
     const RESTITUTION = 1.3;
@@ -210,89 +210,97 @@
             const dir = side * 2 - 1; // -1 for left, 1 for right
 
             // Side walls - from top curve down to flippers
-            for (let i = 0; i < 80; i++) {
+            for (let i = 0; i < 75; i++) {
                 const wallX = CENTER_X + dir * (DOME_RADIUS + WALL_RADIUS);
                 // Only add right wall if it's not in the shooter lane area
-                if (dir === -1 || wallX < SHOOTER_X - 25) {
+                if (dir === -1 || wallX < SHOOTER_X - 30) {
                     createObject(wallX, TABLE_HEIGHT - 8 * i);
                 }
             }
 
-            // Top dome arc
-            for (let i = 0; i < 45; i++) {
-                const angle = i / 28;
+            // Top dome arc - complete curve that directs ball into playfield
+            for (let i = 0; i < 50; i++) {
+                const angle = i / 32;
                 const arcX = CENTER_X + dir * (DOME_RADIUS + WALL_RADIUS) * Math.cos(angle);
-                const arcY = (DOME_RADIUS + WALL_RADIUS) - (DOME_RADIUS + WALL_RADIUS) * Math.sin(angle) + 20;
+                const arcY = (DOME_RADIUS + WALL_RADIUS) - (DOME_RADIUS + WALL_RADIUS) * Math.sin(angle) + 15;
                 // Skip right side arc segments that would be in shooter lane
-                if (arcX < SHOOTER_X - 30) {
+                if (arcX < SHOOTER_X - 35) {
                     createObject(arcX, arcY);
                 }
             }
 
-            // Flipper lane walls (slingshot area)
-            for (let i = 0; i < 12; i++) {
-                createObject(CENTER_X + dir * (FLIPPER_SPREAD + 45), FLIPPER_Y - 40 - i * 7);
+            // Flipper lane walls (slingshot area) - narrower outlanes
+            const laneWallX = CENTER_X + dir * (FLIPPER_SPREAD + 25);
+            for (let i = 0; i < 14; i++) {
+                createObject(laneWallX, FLIPPER_Y - 35 - i * 7);
             }
 
-            // Angled guide walls
+            // Angled guide walls - connect lane walls to flippers
+            for (let i = 0; i < 8; i++) {
+                createObject(CENTER_X + dir * (FLIPPER_SPREAD + 25 - i * 2), FLIPPER_Y - 35 + i * 4);
+            }
+
+            // Slingshots (smaller bumpers in a line) - positioned correctly
             for (let i = 0; i < 10; i++) {
-                createObject(CENTER_X + dir * (FLIPPER_SPREAD + 45 - i * 3), FLIPPER_Y - 40 + i * 3);
-            }
-
-            // Slingshots (smaller bumpers in a line)
-            for (let i = 0; i < 12; i++) {
                 createObject(
-                    CENTER_X + dir * (FLIPPER_SPREAD + 12 + i),
-                    FLIPPER_Y - 45 - i * 2.5,
+                    CENTER_X + dir * (FLIPPER_SPREAD + 8 + i * 0.8),
+                    FLIPPER_Y - 40 - i * 3,
                     TYPE_BUMPER, 3
                 );
             }
         }
 
-        // === BUMPERS (smaller sizes) ===
+        // === BUMPERS ===
 
         // Center bumper cluster (clover pattern)
-        const bumperY = 180;
+        const bumperY = 170;
         createObject(CENTER_X, bumperY, TYPE_BUMPER, 15);
-        createObject(CENTER_X - 40, bumperY - 35, TYPE_BUMPER, 18);
-        createObject(CENTER_X + 40, bumperY - 35, TYPE_BUMPER, 18);
-        createObject(CENTER_X - 40, bumperY + 35, TYPE_BUMPER, 18);
-        createObject(CENTER_X + 40, bumperY + 35, TYPE_BUMPER, 18);
+        createObject(CENTER_X - 35, bumperY - 30, TYPE_BUMPER, 16);
+        createObject(CENTER_X + 35, bumperY - 30, TYPE_BUMPER, 16);
+        createObject(CENTER_X - 35, bumperY + 30, TYPE_BUMPER, 16);
+        createObject(CENTER_X + 35, bumperY + 30, TYPE_BUMPER, 16);
 
-        // Side bumpers - MUCH smaller (was 50, now 18)
-        createObject(CENTER_X - 120, DOME_RADIUS + 60, TYPE_BUMPER, 18);
-        createObject(CENTER_X + 100, DOME_RADIUS + 60, TYPE_BUMPER, 18);
+        // Side bumpers
+        createObject(CENTER_X - 100, DOME_RADIUS + 50, TYPE_BUMPER, 15);
+        createObject(CENTER_X + 85, DOME_RADIUS + 50, TYPE_BUMPER, 15);
 
         // Small bumper grid in middle
-        for (let i = 0; i < 12; i++) {
-            const gridX = CENTER_X + ((i % 3) - 1) * 25;
-            const gridY = 300 - Math.floor(i / 3) * 22;
+        for (let i = 0; i < 9; i++) {
+            const gridX = CENTER_X + ((i % 3) - 1) * 22;
+            const gridY = 280 - Math.floor(i / 3) * 20;
             createObject(gridX, gridY, TYPE_BUMPER, 4);
         }
 
-        // Safety bumpers above flippers
-        createObject(CENTER_X - 100, FLIPPER_Y - 140, TYPE_BUMPER, 10);
-        createObject(CENTER_X + 100, FLIPPER_Y - 140, TYPE_BUMPER, 10);
+        // Safety bumpers above flippers - BIGGER to protect outlanes
+        createObject(CENTER_X - (FLIPPER_SPREAD + 15), FLIPPER_Y - 100, TYPE_BUMPER, 18);
+        createObject(CENTER_X + (FLIPPER_SPREAD + 15), FLIPPER_Y - 100, TYPE_BUMPER, 18);
 
-        // Bottom drain pins
-        createObject(CENTER_X - (FLIPPER_SPREAD + 8), FLIPPER_Y + 25);
-        createObject(CENTER_X + (FLIPPER_SPREAD + 8), FLIPPER_Y + 25);
+        // Bottom drain pins - outside flipper area
+        createObject(CENTER_X - (FLIPPER_SPREAD + 20), FLIPPER_Y + 15);
+        createObject(CENTER_X + (FLIPPER_SPREAD + 20), FLIPPER_Y + 15);
 
         // Shooter lane walls
-        for (let i = 0; i < 70; i++) {
-            createObject(SHOOTER_X - 20, TABLE_HEIGHT - 8 * i); // Left wall of shooter lane
+        for (let i = 0; i < 75; i++) {
+            createObject(SHOOTER_X - 22, TABLE_HEIGHT - 8 * i); // Left wall of shooter lane
         }
-        for (let i = 0; i < 70; i++) {
+        for (let i = 0; i < 75; i++) {
             createObject(TABLE_WIDTH - 5, TABLE_HEIGHT - 8 * i); // Right wall (outer)
         }
 
-        // Curved top entrance to shooter lane
-        for (let i = 0; i < 15; i++) {
-            const angle = (i / 14) * Math.PI / 2;
+        // Curved guide at top of shooter lane - curves ball LEFT into playfield
+        // This is the key curve that sends the ball into the main playfield
+        for (let i = 0; i < 20; i++) {
+            const angle = (i / 19) * Math.PI * 0.6; // Arc from top-right curving left
+            const curveRadius = 30;
             createObject(
-                SHOOTER_X - 20 + 15 * Math.sin(angle),
-                40 - 15 * Math.cos(angle) + 20
+                SHOOTER_X - 22 - curveRadius + curveRadius * Math.cos(angle),
+                25 + curveRadius * Math.sin(angle)
             );
+        }
+
+        // Top wall connecting dome to shooter lane entrance
+        for (let i = 0; i < 8; i++) {
+            createObject(CENTER_X + DOME_RADIUS + 5 + i * 5, 20);
         }
     }
 
