@@ -135,9 +135,9 @@
     const FLIPPER_RADIUS = 10;
     const FLIPPER_SEGMENTS = 45;
     const FLIPPER_SPREAD = 55; // Distance from center to flipper pivot
-    const FLIPPER_Y = TABLE_HEIGHT - 60; // Moved up for proper drain space
+    const FLIPPER_Y = TABLE_HEIGHT - 50; // Lower so ball rolls over flippers
     const SHOOTER_X = CENTER_X + DOME_RADIUS - BALL_RADIUS;
-    const SHOOTER_Y = TABLE_HEIGHT - 60;
+    const SHOOTER_Y = TABLE_HEIGHT - 50;
     const RESTITUTION = 1.3;
     const BUMPER_RESTITUTION = 1.7;
     const PHYSICS_SUBSTEPS = 9;
@@ -232,14 +232,14 @@
                 );
             }
 
-            // Flipper lane side walls
-            for (let i = 0; i < 15; i++) {
+            // Flipper lane side walls - extended to fully enclose flippers
+            for (let i = 0; i < 19; i++) {
                 createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55),
                     FLIPPER_Y - 50 - i * 7);
             }
 
-            // Flipper lane bottom angled walls
-            for (let i = 0; i < 15; i++) {
+            // Flipper lane bottom angled walls - extended to meet flipper pivot
+            for (let i = 0; i < 19; i++) {
                 createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55 - i * 3),
                     FLIPPER_Y - 50 + i * 3);
             }
@@ -272,13 +272,13 @@
         createObject(FLIPPER_CENTER - 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
         createObject(FLIPPER_CENTER + 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
 
-        // Bumper grid
+        // Bumper grid - spaced wider to prevent ball trapping
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
             for (let i = 0; i < 15; i++) {
                 createObject(
-                    CENTER_X + (i % 3) * 18 * dir,
-                    bumperY + 200 - (i % 7) * 16,
+                    CENTER_X + (i % 3) * 26 * dir,
+                    bumperY + 200 - (i % 5) * 28,
                     TYPE_BUMPER, 4
                 );
             }
@@ -340,7 +340,7 @@
                     // Clamp position, apply spring physics
                     shooter.y = Math.min(SHOOTER_MAX + i,
                         shooter.y + (shooter.vy = keys.c ? 0.05 :
-                        (SHOOTER_Y + i - shooter.y) / 19));
+                        Math.sin(frame) / 99 + (SHOOTER_Y + i - shooter.y) / 19));
                     shooter.vy = shooter.y - prevY;
                 }
             }
@@ -362,6 +362,15 @@
                         ball.y = FLIPPER_Y - 20;
                         ball.vx = 0;
                         ball.vy = 0;
+                        // Reset shooter segments to rest position
+                        const rstStart = 1 + FLIPPER_SEGMENTS * 2;
+                        for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
+                            const seg = objects[rstStart + si];
+                            if (seg && seg.isShooter) {
+                                seg.y = SHOOTER_Y + si;
+                                seg.vy = 0;
+                            }
+                        }
                     } else {
                         // Game over
                         setTimeout(() => {
@@ -375,6 +384,15 @@
                             ball.vx = 0;
                             ball.vy = 0;
                             gameStarted = false;
+                            // Reset shooter segments to rest position
+                            const goStart = 1 + FLIPPER_SEGMENTS * 2;
+                            for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
+                                const seg = objects[goStart + si];
+                                if (seg && seg.isShooter) {
+                                    seg.y = SHOOTER_Y + si;
+                                    seg.vy = 0;
+                                }
+                            }
                             document.getElementById('instructions').classList.remove('hidden');
                         }, 500);
                     }
