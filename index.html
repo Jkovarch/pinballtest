@@ -134,14 +134,19 @@
     const DOME_RADIUS = 150;
     const FLIPPER_RADIUS = 10;
     const FLIPPER_SEGMENTS = 45;
-    const FLIPPER_SPREAD = 55; // Distance from center to flipper pivot
-    const FLIPPER_Y = TABLE_HEIGHT - 40; // Low enough so ball rolls over flippers
+    const FLIPPER_SPREAD = 55;
+    const FLIPPER_Y = TABLE_HEIGHT - 40; // Lane wall reference
+    const FLIPPER_Y_ACTUAL = FLIPPER_Y + 14; // Flippers sit 1 ball-width below lane walls
     const SHOOTER_X = CENTER_X + DOME_RADIUS - BALL_RADIUS;
     const SHOOTER_Y = TABLE_HEIGHT - 40;
     const RESTITUTION = 1.3;
     const BUMPER_RESTITUTION = 1.7;
     const PHYSICS_SUBSTEPS = 9;
     const GRAVITY = 0.0017;
+
+    // Top lane constants
+    const TOP_LANE_Y = 55;
+    const TOP_LANE_PINS = [CENTER_X - 60, CENTER_X - 20, CENTER_X + 20, CENTER_X + 60];
 
     // Object types
     const TYPE_WALL = 0;
@@ -158,17 +163,23 @@
     let offsetX = 0;
     let offsetY = 0;
 
-    // Flipper angles - match Lu1ky: starts at 1 (down), goes to -1 (up) when pressed
-    let flipperLeft = 1;   // Rest position (down, ~28 degrees)
-    let flipperRight = 1;  // Rest position (down, ~28 degrees)
+    // Flipper angles
+    let flipperLeft = 1;
+    let flipperRight = 1;
     let keys = { z: false, x: false, c: false };
 
-    // Swipe detection for launcher
+    // Swipe detection
     let swipeStartY = 0;
     let isSwiping = false;
 
     // Drop targets
     let dropTargets = [];
+
+    // Top lane rolling lights
+    let topLaneLights = [false, false, false];
+    let ballInTopLane = false;
+    let flipperLeftWasPressed = false;
+    let flipperRightWasPressed = false;
 
     // === OBJECT CREATION ===
     function createObject(x, y, type = TYPE_WALL, radius = WALL_RADIUS) {
@@ -191,7 +202,7 @@
         dropTargets = [];
 
         // Ball (index 0) - starts in shooter lane
-        const ball = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS, FLIPPER_Y - 20);
+        const ball = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS, SHOOTER_Y - 20);
         ball.radius = BALL_RADIUS;
         ball.color = '#ffffff';
         ball.isBall = true;
@@ -202,7 +213,7 @@
             createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
         }
 
-        // Shooter segments - matching Lu1ky placement
+        // Shooter segments
         for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
             const shooter = createObject(
                 CENTER_X + DOME_RADIUS - BALL_RADIUS,
@@ -213,22 +224,22 @@
             shooter.shooterIndex = i;
         }
 
-        // Build symmetric elements - matching Lu1ky structure
+        // Build symmetric elements
         const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS;
         const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
 
         for (let side = 0; side < 2; side++) {
-            const dir = side * 2 - 1; // -1 for left, 1 for right
+            const dir = side * 2 - 1;
 
             // Bottom drain pin
             createObject(FLIPPER_CENTER, FLIPPER_Y + 40);
 
-            // Side walls - full height
+            // Side walls
             for (let i = 0; i < 90; i++) {
                 createObject(CENTER_X + dir * DOME_BOTH, TABLE_HEIGHT - 7 * i);
             }
 
-            // Top dome arc - extends fully, covering shooter lane entrance
+            // Top dome arc
             for (let i = 0; i < 55; i++) {
                 createObject(
                     CENTER_X + dir * DOME_BOTH * Math.cos(i / 35),
@@ -236,13 +247,13 @@
                 );
             }
 
-            // Flipper lane side walls - shortened for wider outlane openings
+            // Flipper lane side walls - shortened for wider outlanes
             for (let i = 0; i < 12; i++) {
                 createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55),
                     FLIPPER_Y - 50 - i * 7);
             }
 
-            // Flipper lane bottom angled walls - extended to meet flipper pivot
+            // Flipper lane bottom angled walls
             for (let i = 0; i < 19; i++) {
                 createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55 - i * 3),
                     FLIPPER_Y - 50 + i * 3);
@@ -260,7 +271,7 @@
                 createObject(slingOuterX, slingTopY + t * (slingBottomY - slingTopY));
             }
 
-            // Diagonal kicking surface (bumper) - top-outer to bottom-inner
+            // Diagonal kicking surface (bumper)
             for (let i = 0; i <= 9; i++) {
                 const t = i / 9;
                 createObject(
@@ -288,11 +299,11 @@
         centerBumper.isHighValue = true;
         centerBumper.color = '#ff0000';
 
-        // Clover bumpers (20% smaller)
+        // Clover bumpers (20% smaller) - bottom pair moved down 2 widths
         createObject(CENTER_X - 45, bumperY - 45, TYPE_BUMPER, 24);
         createObject(CENTER_X + 45, bumperY - 45, TYPE_BUMPER, 24);
-        createObject(CENTER_X - 45, bumperY + 45, TYPE_BUMPER, 24);
-        createObject(CENTER_X + 45, bumperY + 45, TYPE_BUMPER, 24);
+        createObject(CENTER_X - 45, bumperY + 93, TYPE_BUMPER, 24);
+        createObject(CENTER_X + 45, bumperY + 93, TYPE_BUMPER, 24);
 
         // Side bumpers (20% smaller)
         createObject(FLIPPER_CENTER - 150, DOME_RADIUS + 90, TYPE_BUMPER, 36);
@@ -302,7 +313,7 @@
         createObject(FLIPPER_CENTER - 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
         createObject(FLIPPER_CENTER + 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
 
-        // Bumper grid - trimmed: removed outer rows/columns for more playfield space
+        // Bumper grid - trimmed 3x3 per side
         const gridCols = 3;
         const gridRows = 3;
         const gridSpacingX = 26;
@@ -317,7 +328,6 @@
                         gridStartY - row * gridSpacingY,
                         TYPE_BUMPER, 4
                     );
-                    // Center pin on middle row = red high value target
                     if (col === 0 && row === 1) {
                         pin.isHighValue = true;
                         pin.color = '#ff0000';
@@ -326,23 +336,26 @@
             }
         }
 
-        // === DROP TARGETS - left side near wall, line-shaped (3 circles each) ===
+        // === DROP TARGETS - vertical along left wall, 2 circles each ===
         const dtBaseX = 42;
-        const dtBaseY = 310;
+        const dtBaseY = 300;
         for (let row = 0; row < 4; row++) {
-            const dtGroup = [];
-            for (let col = 0; col < 3; col++) {
-                const dt = createObject(dtBaseX + col * 10, dtBaseY + row * 28, TYPE_DROP_TARGET, 5);
+            for (let j = 0; j < 2; j++) {
+                const dt = createObject(dtBaseX, dtBaseY + row * 32 + j * 11, TYPE_DROP_TARGET, 5);
                 dt.isDropTarget = true;
                 dt.active = true;
                 dt.dropGroup = row;
                 dt.color = '#ffff00';
                 dropTargets.push(dt);
-                dtGroup.push(dt);
             }
         }
 
-        // Shooter lane inner wall - extended up under pop bumper as 1-way gate
+        // === TOP LANE - 4 pins with 3 rolling lights ===
+        for (let i = 0; i < 4; i++) {
+            createObject(TOP_LANE_PINS[i], TOP_LANE_Y, TYPE_WALL, 5);
+        }
+
+        // Shooter lane inner wall - extended up under pop bumper
         const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
         for (let i = 0; i < 65; i++) {
             createObject(shooterWallX, TABLE_HEIGHT - 7 * i);
@@ -353,8 +366,23 @@
     function updatePhysics() {
         const ball = objects[0];
 
+        // Detect flipper press transitions for light rolling
+        const leftJustPressed = keys.z && !flipperLeftWasPressed;
+        const rightJustPressed = keys.x && !flipperRightWasPressed;
+
+        if (leftJustPressed && topLaneLights.some(l => l)) {
+            // Rotate lights left (shift pattern left, wrap around)
+            topLaneLights = [topLaneLights[1], topLaneLights[2], topLaneLights[0]];
+        }
+        if (rightJustPressed && topLaneLights.some(l => l)) {
+            // Rotate lights right (shift pattern right, wrap around)
+            topLaneLights = [topLaneLights[2], topLaneLights[0], topLaneLights[1]];
+        }
+
+        flipperLeftWasPressed = keys.z;
+        flipperRightWasPressed = keys.x;
+
         for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep++) {
-            // Update flipper angles - EXACTLY matching Lu1ky
             const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS;
 
             flipperLeft = Math.max(-1, Math.min(1,
@@ -363,37 +391,34 @@
             flipperRight = Math.max(-1, Math.min(1,
                 flipperRight + (keys.x ? -0.07 : 0.05)));
 
-            // Update flipper segment positions - Lu1ky formula
+            // Update flipper segment positions - using FLIPPER_Y_ACTUAL
             for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
-                // Left flipper (s=0, dir=-1)
                 const leftObj = objects[1 + i];
                 const prevLeftX = leftObj.x;
                 const prevLeftY = leftObj.y;
                 leftObj.x = FLIPPER_CENTER + (-1) * (FLIPPER_SPREAD - i * Math.cos(flipperLeft / 2));
-                leftObj.y = FLIPPER_Y + i * Math.sin(flipperLeft / 2);
+                leftObj.y = FLIPPER_Y_ACTUAL + i * Math.sin(flipperLeft / 2);
                 leftObj.vx = leftObj.x - prevLeftX;
                 leftObj.vy = leftObj.y - prevLeftY;
                 leftObj.radius = FLIPPER_RADIUS - i / 7;
 
-                // Right flipper (s=1, dir=+1)
                 const rightObj = objects[1 + FLIPPER_SEGMENTS + i];
                 const prevRightX = rightObj.x;
                 const prevRightY = rightObj.y;
                 rightObj.x = FLIPPER_CENTER + (1) * (FLIPPER_SPREAD - i * Math.cos(flipperRight / 2));
-                rightObj.y = FLIPPER_Y + i * Math.sin(flipperRight / 2);
+                rightObj.y = FLIPPER_Y_ACTUAL + i * Math.sin(flipperRight / 2);
                 rightObj.vx = rightObj.x - prevRightX;
                 rightObj.vy = rightObj.y - prevRightY;
                 rightObj.radius = FLIPPER_RADIUS - i / 7;
             }
 
-            // Update shooter - Lu1ky style spring physics
+            // Update shooter
             const shooterStart = 1 + FLIPPER_SEGMENTS * 2;
             const SHOOTER_MAX = TABLE_HEIGHT - 10;
             for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
                 const shooter = objects[shooterStart + i];
                 if (shooter && shooter.isShooter) {
                     const prevY = shooter.y;
-                    // Clamp position, apply spring physics with Lu1ky randomness
                     shooter.y = Math.min(SHOOTER_MAX + i,
                         shooter.y + (shooter.vy = keys.c ? 0.05 :
                         Math.sin(frame) / 99 + (SHOOTER_Y + i - shooter.y) / 19));
@@ -406,6 +431,29 @@
             ball.y += ball.vy;
             ball.vy += GRAVITY;
 
+            // Top lane light sensor
+            const inLaneZone = Math.abs(ball.y - TOP_LANE_Y) < BALL_RADIUS + 5;
+            if (inLaneZone && !ballInTopLane) {
+                ballInTopLane = true;
+                for (let g = 0; g < 3; g++) {
+                    const gapLeft = TOP_LANE_PINS[g] + 6;
+                    const gapRight = TOP_LANE_PINS[g + 1] - 6;
+                    if (ball.x > gapLeft && ball.x < gapRight) {
+                        topLaneLights[g] = true;
+
+                        // Check if all 3 lit
+                        if (topLaneLights.every(l => l)) {
+                            score += 50;
+                            document.getElementById('score').textContent = score;
+                            topLaneLights = [false, false, false];
+                        }
+                        break;
+                    }
+                }
+            } else if (!inLaneZone) {
+                ballInTopLane = false;
+            }
+
             // Check if ball is lost
             if (ball.y > TABLE_HEIGHT + 50) {
                 if (ballCount > 0) {
@@ -413,12 +461,10 @@
                     document.getElementById('balls').textContent = ballCount;
 
                     if (ballCount > 0) {
-                        // Respawn ball in shooter lane
                         ball.x = CENTER_X + DOME_RADIUS - BALL_RADIUS;
-                        ball.y = FLIPPER_Y - 20;
+                        ball.y = SHOOTER_Y - 20;
                         ball.vx = 0;
                         ball.vy = 0;
-                        // Reset shooter segments to rest position
                         const rstStart = 1 + FLIPPER_SEGMENTS * 2;
                         for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
                             const seg = objects[rstStart + si];
@@ -428,7 +474,6 @@
                             }
                         }
                     } else {
-                        // Game over
                         setTimeout(() => {
                             alert('Game Over! Score: ' + score);
                             score = 0;
@@ -436,11 +481,10 @@
                             document.getElementById('score').textContent = score;
                             document.getElementById('balls').textContent = ballCount;
                             ball.x = SHOOTER_X;
-                            ball.y = SHOOTER_Y - 40;
+                            ball.y = SHOOTER_Y - 20;
                             ball.vx = 0;
                             ball.vy = 0;
                             gameStarted = false;
-                            // Reset shooter segments to rest position
                             const goStart = 1 + FLIPPER_SEGMENTS * 2;
                             for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
                                 const seg = objects[goStart + si];
@@ -449,8 +493,8 @@
                                     seg.vy = 0;
                                 }
                             }
-                            // Reset drop targets
                             dropTargets.forEach(dt => { dt.active = true; });
+                            topLaneLights = [false, false, false];
                             document.getElementById('instructions').classList.remove('hidden');
                         }, 500);
                     }
@@ -461,7 +505,6 @@
             for (let i = 1; i < objects.length; i++) {
                 const obj = objects[i];
 
-                // Skip inactive drop targets
                 if (obj.isDropTarget && !obj.active) continue;
 
                 const dx = ball.x - obj.x;
@@ -474,8 +517,6 @@
                     const relVy = obj.vy - ball.vy;
                     const dotProduct = relVx * dx + relVy * dy;
 
-                    // Lu1ky passthrough: bumpers/drop targets don't collide when ball
-                    // has no horizontal velocity (still in shooter lane)
                     if (dotProduct > 0 && !(obj.type && !ball.vx)) {
                         const overlap = minDist - dist;
                         ball.x += (dx / dist) * overlap;
@@ -486,7 +527,6 @@
                         let restitution;
 
                         if (obj.isDropTarget && obj.active && !obj.bounce) {
-                            // Drop target hit - knock down entire row
                             obj.bounce = 10;
                             dropTargets.forEach(dt => {
                                 if (dt.dropGroup === obj.dropGroup) {
@@ -497,11 +537,9 @@
                             score += 5;
                             document.getElementById('score').textContent = score;
 
-                            // Check if all drop targets are knocked down
                             if (dropTargets.every(dt => !dt.active)) {
                                 score += 25;
                                 document.getElementById('score').textContent = score;
-                                // Reset all targets
                                 setTimeout(() => {
                                     dropTargets.forEach(dt => { dt.active = true; });
                                 }, 1500);
@@ -512,7 +550,6 @@
                             obj.bounce = 10;
 
                             if (obj.y < FLIPPER_Y - 80) {
-                                // High value targets give 5 points
                                 if (obj.isHighValue) {
                                     score += 5;
                                 } else {
@@ -552,7 +589,6 @@
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
 
-        // Subtle highlight
         ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.beginPath();
         ctx.arc(x - radius * 0.2, y - radius * 0.2, radius * 0.3, 0, Math.PI * 2);
@@ -567,7 +603,7 @@
         ctx.translate(offsetX, offsetY);
         ctx.scale(scale, scale);
 
-        // Draw background grid
+        // Background grid
         ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)';
         ctx.lineWidth = 1;
         for (let x = 0; x < TABLE_WIDTH; x += 25) {
@@ -583,7 +619,7 @@
             ctx.stroke();
         }
 
-        // Draw border
+        // Border
         ctx.strokeStyle = '#00ffff';
         ctx.lineWidth = 3;
         ctx.strokeRect(5, 5, TABLE_WIDTH - 10, TABLE_HEIGHT - 10);
@@ -598,24 +634,20 @@
                 color = '#ffffff';
             }
 
-            // Left flipper coloring
             if (i >= 1 && i <= FLIPPER_SEGMENTS) {
                 color = keys.z ? '#ff00ff' : '#ff0080';
             }
-            // Right flipper coloring
             else if (i > FLIPPER_SEGMENTS && i <= FLIPPER_SEGMENTS * 2) {
                 color = keys.x ? '#00ffff' : '#0080ff';
             }
 
-            // Shooter coloring
             if (obj.isShooter) {
                 color = '#00aa00';
             }
 
-            // Drop target coloring
             if (obj.isDropTarget) {
                 if (!obj.active) {
-                    color = '#333300'; // Dim when knocked down
+                    color = '#333300';
                 } else if (obj.bounce > 0) {
                     color = '#ffffff';
                 } else {
@@ -623,14 +655,11 @@
                 }
             }
 
-            // High value target coloring (red)
             if (obj.isHighValue && obj.bounce <= 0) {
                 color = '#ff0000';
             }
 
-            // Ball
             if (obj.isBall) {
-                // Ball trail
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
                 ctx.beginPath();
                 ctx.arc(obj.x - obj.vx * 3, obj.y - obj.vy * 3, obj.radius * 0.8, 0, Math.PI * 2);
@@ -642,11 +671,13 @@
             drawCircle(obj.x, obj.y, obj.radius + (obj.bounce || 0), color);
         }
 
-        // Score display in table
-        ctx.fillStyle = '#ff00ff';
-        ctx.font = 'bold 14px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText('SCORE: ' + score, 15, TABLE_HEIGHT - 12);
+        // Draw top lane lights (between pins, above pin row)
+        const topLaneLightY = TOP_LANE_Y - 12;
+        for (let i = 0; i < 3; i++) {
+            const lx = (TOP_LANE_PINS[i] + TOP_LANE_PINS[i + 1]) / 2;
+            const litColor = topLaneLights[i] ? '#ffff00' : '#333333';
+            drawCircle(lx, topLaneLightY, 5, litColor);
+        }
 
         ctx.restore();
 
@@ -714,12 +745,10 @@
             const y = touch.clientY;
             const width = window.innerWidth;
 
-            // Left half = left flipper
             if (x < width * 0.5) {
                 activeTouches.set(touch.identifier, { zone: 'left', startY: y });
                 keys.z = true;
             }
-            // Right half = right flipper OR launcher (swipe down)
             else {
                 activeTouches.set(touch.identifier, { zone: 'right', startY: y });
                 keys.x = true;
@@ -732,7 +761,6 @@
             const touchData = activeTouches.get(touch.identifier);
             if (touchData && touchData.zone === 'right') {
                 const deltaY = touch.clientY - touchData.startY;
-                // If swiping down more than 30px, activate launcher
                 if (deltaY > 30) {
                     keys.c = true;
                     touchData.swiping = true;
@@ -746,7 +774,6 @@
             const touchData = activeTouches.get(touch.identifier);
             activeTouches.delete(touch.identifier);
 
-            // Check remaining touches
             let stillLeft = false, stillRight = false;
             for (let [id, data] of activeTouches) {
                 if (data.zone === 'left') stillLeft = true;
@@ -756,7 +783,6 @@
             if (!stillLeft) keys.z = false;
             if (!stillRight) keys.x = false;
 
-            // Release launcher if was swiping
             if (touchData && touchData.swiping) {
                 keys.c = false;
             }
@@ -768,19 +794,19 @@
     document.addEventListener('touchend', handleTouchEnd, { passive: false });
     document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
-    // Mouse fallback (for desktop testing)
+    // Mouse fallback
     canvas.addEventListener('mousedown', (e) => {
         const x = e.clientX;
         const width = window.innerWidth;
 
-        if (e.button === 0) { // Left click
+        if (e.button === 0) {
             if (x < width * 0.5) {
                 keys.z = true;
             } else {
                 keys.x = true;
             }
         }
-        if (e.button === 2) { // Right click = launcher
+        if (e.button === 2) {
             keys.c = true;
         }
     });
