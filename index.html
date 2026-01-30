@@ -248,11 +248,11 @@
                     FLIPPER_Y - 50 + i * 3);
             }
 
-            // Triangular slingshots - aligned with flipper pivot
+            // Triangular slingshots - moved up, aligned with flipper pivot
             const slingInnerX = FLIPPER_CENTER + dir * FLIPPER_SPREAD;
             const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
-            const slingTopY = FLIPPER_Y - 80;
-            const slingBottomY = FLIPPER_Y - 35;
+            const slingTopY = FLIPPER_Y - 120;
+            const slingBottomY = FLIPPER_Y - 70;
 
             // Outer vertical side (wall)
             for (let i = 0; i <= 7; i++) {
@@ -288,44 +288,58 @@
         centerBumper.isHighValue = true;
         centerBumper.color = '#ff0000';
 
-        // Clover bumpers
-        createObject(CENTER_X - 45, bumperY - 45, TYPE_BUMPER, 30);
-        createObject(CENTER_X + 45, bumperY - 45, TYPE_BUMPER, 30);
-        createObject(CENTER_X - 45, bumperY + 45, TYPE_BUMPER, 30);
-        createObject(CENTER_X + 45, bumperY + 45, TYPE_BUMPER, 30);
+        // Clover bumpers (20% smaller)
+        createObject(CENTER_X - 45, bumperY - 45, TYPE_BUMPER, 24);
+        createObject(CENTER_X + 45, bumperY - 45, TYPE_BUMPER, 24);
+        createObject(CENTER_X - 45, bumperY + 45, TYPE_BUMPER, 24);
+        createObject(CENTER_X + 45, bumperY + 45, TYPE_BUMPER, 24);
 
-        // Side bumpers
-        createObject(FLIPPER_CENTER - 150, DOME_RADIUS + 90, TYPE_BUMPER, 45);
-        createObject(FLIPPER_CENTER + 150, DOME_RADIUS + 90, TYPE_BUMPER, 45);
+        // Side bumpers (20% smaller)
+        createObject(FLIPPER_CENTER - 150, DOME_RADIUS + 90, TYPE_BUMPER, 36);
+        createObject(FLIPPER_CENTER + 150, DOME_RADIUS + 90, TYPE_BUMPER, 36);
 
         // Safety bumpers near outlanes
         createObject(FLIPPER_CENTER - 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
         createObject(FLIPPER_CENTER + 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
 
-        // Bumper grid - spaced wider to prevent ball trapping
+        // Bumper grid - trimmed: removed outer rows/columns for more playfield space
+        const gridCols = 3;
+        const gridRows = 3;
+        const gridSpacingX = 26;
+        const gridSpacingY = 28;
+        const gridStartY = bumperY + 170;
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
-            for (let i = 0; i < 15; i++) {
-                const pin = createObject(
-                    CENTER_X + (i % 3) * 26 * dir,
-                    bumperY + 200 - (i % 5) * 28,
-                    TYPE_BUMPER, 4
-                );
-                // Center pin on middle row = red high value target
-                if (i % 3 === 0 && i % 5 === 2) {
-                    pin.isHighValue = true;
-                    pin.color = '#ff0000';
+            for (let row = 0; row < gridRows; row++) {
+                for (let col = 0; col < gridCols; col++) {
+                    const pin = createObject(
+                        CENTER_X + col * gridSpacingX * dir,
+                        gridStartY - row * gridSpacingY,
+                        TYPE_BUMPER, 4
+                    );
+                    // Center pin on middle row = red high value target
+                    if (col === 0 && row === 1) {
+                        pin.isHighValue = true;
+                        pin.color = '#ff0000';
+                    }
                 }
             }
         }
 
-        // === DROP TARGETS - left side under big pop bumper ===
-        for (let i = 0; i < 4; i++) {
-            const dt = createObject(75, 310 + i * 28, TYPE_DROP_TARGET, 6);
-            dt.isDropTarget = true;
-            dt.active = true;
-            dt.color = '#ffff00';
-            dropTargets.push(dt);
+        // === DROP TARGETS - left side near wall, line-shaped (3 circles each) ===
+        const dtBaseX = 42;
+        const dtBaseY = 310;
+        for (let row = 0; row < 4; row++) {
+            const dtGroup = [];
+            for (let col = 0; col < 3; col++) {
+                const dt = createObject(dtBaseX + col * 10, dtBaseY + row * 28, TYPE_DROP_TARGET, 5);
+                dt.isDropTarget = true;
+                dt.active = true;
+                dt.dropGroup = row;
+                dt.color = '#ffff00';
+                dropTargets.push(dt);
+                dtGroup.push(dt);
+            }
         }
 
         // Shooter lane inner wall - extended up under pop bumper as 1-way gate
@@ -472,9 +486,14 @@
                         let restitution;
 
                         if (obj.isDropTarget && obj.active && !obj.bounce) {
-                            // Drop target hit
+                            // Drop target hit - knock down entire row
                             obj.bounce = 10;
-                            obj.active = false;
+                            dropTargets.forEach(dt => {
+                                if (dt.dropGroup === obj.dropGroup) {
+                                    dt.active = false;
+                                    dt.bounce = 10;
+                                }
+                            });
                             score += 5;
                             document.getElementById('score').textContent = score;
 
