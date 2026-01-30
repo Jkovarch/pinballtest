@@ -135,9 +135,9 @@
     const FLIPPER_RADIUS = 10;
     const FLIPPER_SEGMENTS = 45;
     const FLIPPER_SPREAD = 55; // Distance from center to flipper pivot
-    const FLIPPER_Y = TABLE_HEIGHT - 50; // Lower so ball rolls over flippers
+    const FLIPPER_Y = TABLE_HEIGHT - 40; // Low enough so ball rolls over flippers
     const SHOOTER_X = CENTER_X + DOME_RADIUS - BALL_RADIUS;
-    const SHOOTER_Y = TABLE_HEIGHT - 50;
+    const SHOOTER_Y = TABLE_HEIGHT - 40;
     const RESTITUTION = 1.3;
     const BUMPER_RESTITUTION = 1.7;
     const PHYSICS_SUBSTEPS = 9;
@@ -146,6 +146,7 @@
     // Object types
     const TYPE_WALL = 0;
     const TYPE_BUMPER = 1;
+    const TYPE_DROP_TARGET = 2;
 
     // === GAME STATE ===
     let objects = [];
@@ -166,6 +167,9 @@
     let swipeStartY = 0;
     let isSwiping = false;
 
+    // Drop targets
+    let dropTargets = [];
+
     // === OBJECT CREATION ===
     function createObject(x, y, type = TYPE_WALL, radius = WALL_RADIUS) {
         objects.push({
@@ -176,7 +180,7 @@
             vx: 0,
             vy: 0,
             bounce: 0,
-            color: type === TYPE_BUMPER ? '#ff00ff' : '#00ffff'
+            color: type === TYPE_BUMPER ? '#ff00ff' : type === TYPE_DROP_TARGET ? '#ffff00' : '#00ffff'
         });
         return objects[objects.length - 1];
     }
@@ -184,6 +188,7 @@
     // === BUILD TABLE ===
     function buildTable() {
         objects = [];
+        dropTargets = [];
 
         // Ball (index 0) - starts in shooter lane
         const ball = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS, FLIPPER_Y - 20);
@@ -224,7 +229,6 @@
             }
 
             // Top dome arc - extends fully, covering shooter lane entrance
-            // This is the KEY fix: the arc curves over the top of the shooter lane
             for (let i = 0; i < 55; i++) {
                 createObject(
                     CENTER_X + dir * DOME_BOTH * Math.cos(i / 35),
@@ -232,8 +236,8 @@
                 );
             }
 
-            // Flipper lane side walls - extended to fully enclose flippers
-            for (let i = 0; i < 19; i++) {
+            // Flipper lane side walls - shortened for wider outlane openings
+            for (let i = 0; i < 12; i++) {
                 createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55),
                     FLIPPER_Y - 50 - i * 7);
             }
@@ -244,21 +248,47 @@
                     FLIPPER_Y - 50 + i * 3);
             }
 
-            // Slingshots
-            for (let i = 0; i < 15; i++) {
+            // Triangular slingshots - aligned with flipper pivot
+            const slingInnerX = FLIPPER_CENTER + dir * FLIPPER_SPREAD;
+            const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
+            const slingTopY = FLIPPER_Y - 80;
+            const slingBottomY = FLIPPER_Y - 35;
+
+            // Outer vertical side (wall)
+            for (let i = 0; i <= 7; i++) {
+                const t = i / 7;
+                createObject(slingOuterX, slingTopY + t * (slingBottomY - slingTopY));
+            }
+
+            // Diagonal kicking surface (bumper) - top-outer to bottom-inner
+            for (let i = 0; i <= 9; i++) {
+                const t = i / 9;
                 createObject(
-                    FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 15 + i),
-                    FLIPPER_Y - 55 - i * 3,
+                    slingOuterX + (slingInnerX - slingOuterX) * t,
+                    slingTopY + (slingBottomY - slingTopY) * t,
                     TYPE_BUMPER, 4
+                );
+            }
+
+            // Bottom connecting wall
+            for (let i = 0; i <= 4; i++) {
+                const t = i / 4;
+                createObject(
+                    slingInnerX + (slingOuterX - slingInnerX) * t,
+                    slingBottomY
                 );
             }
         }
 
         // === BUMPERS ===
 
-        // Score bumpers - clover pattern (matching Lu1ky)
+        // Center score bumper - RED high value target
         const bumperY = 160;
-        createObject(CENTER_X, bumperY, TYPE_BUMPER, 12);
+        const centerBumper = createObject(CENTER_X, bumperY, TYPE_BUMPER, 12);
+        centerBumper.isHighValue = true;
+        centerBumper.color = '#ff0000';
+
+        // Clover bumpers
         createObject(CENTER_X - 45, bumperY - 45, TYPE_BUMPER, 30);
         createObject(CENTER_X + 45, bumperY - 45, TYPE_BUMPER, 30);
         createObject(CENTER_X - 45, bumperY + 45, TYPE_BUMPER, 30);
@@ -268,7 +298,7 @@
         createObject(FLIPPER_CENTER - 150, DOME_RADIUS + 90, TYPE_BUMPER, 45);
         createObject(FLIPPER_CENTER + 150, DOME_RADIUS + 90, TYPE_BUMPER, 45);
 
-        // Safety bumpers near outlanes - moved higher so they don't block outlanes
+        // Safety bumpers near outlanes
         createObject(FLIPPER_CENTER - 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
         createObject(FLIPPER_CENTER + 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
 
@@ -276,17 +306,31 @@
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
             for (let i = 0; i < 15; i++) {
-                createObject(
+                const pin = createObject(
                     CENTER_X + (i % 3) * 26 * dir,
                     bumperY + 200 - (i % 5) * 28,
                     TYPE_BUMPER, 4
                 );
+                // Center pin on middle row = red high value target
+                if (i % 3 === 0 && i % 5 === 2) {
+                    pin.isHighValue = true;
+                    pin.color = '#ff0000';
+                }
             }
         }
 
-        // Shooter lane inner wall - stops before top so dome arc covers entrance
+        // === DROP TARGETS - left side under big pop bumper ===
+        for (let i = 0; i < 4; i++) {
+            const dt = createObject(75, 310 + i * 28, TYPE_DROP_TARGET, 6);
+            dt.isDropTarget = true;
+            dt.active = true;
+            dt.color = '#ffff00';
+            dropTargets.push(dt);
+        }
+
+        // Shooter lane inner wall - extended up under pop bumper as 1-way gate
         const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
-        for (let i = 0; i < 55; i++) {
+        for (let i = 0; i < 65; i++) {
             createObject(shooterWallX, TABLE_HEIGHT - 7 * i);
         }
     }
@@ -297,8 +341,6 @@
 
         for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep++) {
             // Update flipper angles - EXACTLY matching Lu1ky
-            // At rest: angle = 1, sin(0.5)>0 = flippers point DOWN
-            // Pressed: angle = -1, sin(-0.5)<0 = flippers point UP
             const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS;
 
             flipperLeft = Math.max(-1, Math.min(1,
@@ -337,7 +379,7 @@
                 const shooter = objects[shooterStart + i];
                 if (shooter && shooter.isShooter) {
                     const prevY = shooter.y;
-                    // Clamp position, apply spring physics
+                    // Clamp position, apply spring physics with Lu1ky randomness
                     shooter.y = Math.min(SHOOTER_MAX + i,
                         shooter.y + (shooter.vy = keys.c ? 0.05 :
                         Math.sin(frame) / 99 + (SHOOTER_Y + i - shooter.y) / 19));
@@ -393,6 +435,8 @@
                                     seg.vy = 0;
                                 }
                             }
+                            // Reset drop targets
+                            dropTargets.forEach(dt => { dt.active = true; });
                             document.getElementById('instructions').classList.remove('hidden');
                         }, 500);
                     }
@@ -402,6 +446,9 @@
             // Collision detection
             for (let i = 1; i < objects.length; i++) {
                 const obj = objects[i];
+
+                // Skip inactive drop targets
+                if (obj.isDropTarget && !obj.active) continue;
 
                 const dx = ball.x - obj.x;
                 const dy = ball.y - obj.y;
@@ -413,9 +460,8 @@
                     const relVy = obj.vy - ball.vy;
                     const dotProduct = relVx * dx + relVy * dy;
 
-                    // Lu1ky passthrough: bumpers don't collide when ball
+                    // Lu1ky passthrough: bumpers/drop targets don't collide when ball
                     // has no horizontal velocity (still in shooter lane)
-                    // This simulates the ball going over a ramp before entering play
                     if (dotProduct > 0 && !(obj.type && !ball.vx)) {
                         const overlap = minDist - dist;
                         ball.x += (dx / dist) * overlap;
@@ -424,11 +470,35 @@
                         const tangent = dist * dist / (relVy * dx - relVx * dy);
 
                         let restitution;
-                        if (obj.type === TYPE_BUMPER && !obj.bounce) {
+
+                        if (obj.isDropTarget && obj.active && !obj.bounce) {
+                            // Drop target hit
+                            obj.bounce = 10;
+                            obj.active = false;
+                            score += 5;
+                            document.getElementById('score').textContent = score;
+
+                            // Check if all drop targets are knocked down
+                            if (dropTargets.every(dt => !dt.active)) {
+                                score += 25;
+                                document.getElementById('score').textContent = score;
+                                // Reset all targets
+                                setTimeout(() => {
+                                    dropTargets.forEach(dt => { dt.active = true; });
+                                }, 1500);
+                            }
+
+                            restitution = BUMPER_RESTITUTION;
+                        } else if (obj.type === TYPE_BUMPER && !obj.bounce) {
                             obj.bounce = 10;
 
                             if (obj.y < FLIPPER_Y - 80) {
-                                score++;
+                                // High value targets give 5 points
+                                if (obj.isHighValue) {
+                                    score += 5;
+                                } else {
+                                    score++;
+                                }
                                 document.getElementById('score').textContent = score;
 
                                 if (score % 50 === 0) {
@@ -521,6 +591,22 @@
             // Shooter coloring
             if (obj.isShooter) {
                 color = '#00aa00';
+            }
+
+            // Drop target coloring
+            if (obj.isDropTarget) {
+                if (!obj.active) {
+                    color = '#333300'; // Dim when knocked down
+                } else if (obj.bounce > 0) {
+                    color = '#ffffff';
+                } else {
+                    color = '#ffff00';
+                }
+            }
+
+            // High value target coloring (red)
+            if (obj.isHighValue && obj.bounce <= 0) {
+                color = '#ff0000';
             }
 
             // Ball
