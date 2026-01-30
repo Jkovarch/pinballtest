@@ -135,10 +135,11 @@
     const FLIPPER_RADIUS = 10;
     const FLIPPER_SEGMENTS = 45;
     const FLIPPER_SPREAD = 55;
-    const FLIPPER_Y = TABLE_HEIGHT - 40; // Lane wall reference
+    const FLIPPER_Y = TABLE_HEIGHT - 60; // Lane wall reference (moved up 20px)
     const FLIPPER_Y_ACTUAL = FLIPPER_Y + 14; // Flippers sit 1 ball-width below lane walls
+    const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS; // 168
     const SHOOTER_X = CENTER_X + DOME_RADIUS - BALL_RADIUS;
-    const SHOOTER_Y = TABLE_HEIGHT - 40;
+    const SHOOTER_Y = TABLE_HEIGHT - 60;
     const RESTITUTION = 1.3;
     const BUMPER_RESTITUTION = 1.7;
     const PHYSICS_SUBSTEPS = 9;
@@ -152,6 +153,24 @@
     const TYPE_WALL = 0;
     const TYPE_BUMPER = 1;
     const TYPE_DROP_TARGET = 2;
+
+    // Spot target positions (right side, against shooter lane wall)
+    const SPOT_TARGET_POSITIONS = [
+        {x: 300, y: 280},
+        {x: 300, y: 320},
+        {x: 300, y: 360},
+        {x: 300, y: 400}
+    ];
+    const BUMPER_COLORS = ['#ff0000', '#00ff00', '#0088ff', '#ff00ff', '#ff8800'];
+
+    // Lane rollover light positions (outlanes and inlanes)
+    const LANE_LIGHT_Y = FLIPPER_Y - 35;
+    const LANE_LIGHT_POSITIONS = [
+        {x: 73, y: LANE_LIGHT_Y},   // Left outlane
+        {x: 140, y: LANE_LIGHT_Y},  // Left inlane
+        {x: 196, y: LANE_LIGHT_Y},  // Right inlane
+        {x: 263, y: LANE_LIGHT_Y}   // Right outlane
+    ];
 
     // === GAME STATE ===
     let objects = [];
@@ -180,6 +199,14 @@
     let ballInTopLane = false;
     let flipperLeftWasPressed = false;
     let flipperRightWasPressed = false;
+
+    // Spot targets (right side)
+    let spotTargets = [false, false, false, false];
+    let spotCompletions = 0;
+    let scoreMultiplier = 1;
+
+    // Lane rollover lights
+    let laneLights = [false, false, false, false];
 
     // === OBJECT CREATION ===
     function createObject(x, y, type = TYPE_WALL, radius = WALL_RADIUS) {
@@ -225,7 +252,6 @@
         }
 
         // Build symmetric elements
-        const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS;
         const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
 
         for (let side = 0; side < 2; side++) {
@@ -259,21 +285,22 @@
                     FLIPPER_Y - 50 + i * 3);
             }
 
-            // Triangular slingshots - moved up, aligned with flipper pivot
+            // Triangular slingshots - with 45-degree angled bottom
             const slingInnerX = FLIPPER_CENTER + dir * FLIPPER_SPREAD;
             const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
             const slingTopY = FLIPPER_Y - 120;
             const slingBottomY = FLIPPER_Y - 70;
+            const slingBottomOuterY = slingBottomY + 25; // 45-degree angle drop
 
-            // Outer vertical side (wall)
-            for (let i = 0; i <= 7; i++) {
-                const t = i / 7;
-                createObject(slingOuterX, slingTopY + t * (slingBottomY - slingTopY));
-            }
-
-            // Diagonal kicking surface (bumper)
+            // Outer vertical side (wall) - extended to meet angled bottom
             for (let i = 0; i <= 9; i++) {
                 const t = i / 9;
+                createObject(slingOuterX, slingTopY + t * (slingBottomOuterY - slingTopY));
+            }
+
+            // Diagonal kicking surface (bumper) - extended 15% past endpoint
+            for (let i = 0; i <= 12; i++) {
+                const t = i * 1.15 / 12;
                 createObject(
                     slingOuterX + (slingInnerX - slingOuterX) * t,
                     slingTopY + (slingBottomY - slingTopY) * t,
@@ -281,12 +308,12 @@
                 );
             }
 
-            // Bottom connecting wall
-            for (let i = 0; i <= 4; i++) {
-                const t = i / 4;
+            // Bottom wall at 45-degree angle (inner to outer-lower)
+            for (let i = 0; i <= 5; i++) {
+                const t = i / 5;
                 createObject(
                     slingInnerX + (slingOuterX - slingInnerX) * t,
-                    slingBottomY
+                    slingBottomY + (slingBottomOuterY - slingBottomY) * t
                 );
             }
         }
@@ -297,21 +324,22 @@
         const bumperY = 160;
         const centerBumper = createObject(CENTER_X, bumperY, TYPE_BUMPER, 12);
         centerBumper.isHighValue = true;
+        centerBumper.isCenterBumper = true;
         centerBumper.color = '#ff0000';
 
-        // Clover bumpers (20% smaller) - bottom pair moved down 2 widths
+        // Clover bumpers - bottom pair moved down 2 widths
         createObject(CENTER_X - 45, bumperY - 45, TYPE_BUMPER, 24);
         createObject(CENTER_X + 45, bumperY - 45, TYPE_BUMPER, 24);
         createObject(CENTER_X - 45, bumperY + 93, TYPE_BUMPER, 24);
         createObject(CENTER_X + 45, bumperY + 93, TYPE_BUMPER, 24);
 
-        // Side bumpers (20% smaller)
-        createObject(FLIPPER_CENTER - 150, DOME_RADIUS + 90, TYPE_BUMPER, 36);
-        createObject(FLIPPER_CENTER + 150, DOME_RADIUS + 90, TYPE_BUMPER, 36);
+        // Side bumpers (30% smaller: 36 -> 25)
+        createObject(FLIPPER_CENTER - 150, DOME_RADIUS + 90, TYPE_BUMPER, 25);
+        createObject(FLIPPER_CENTER + 150, DOME_RADIUS + 90, TYPE_BUMPER, 25);
 
-        // Safety bumpers near outlanes
-        createObject(FLIPPER_CENTER - 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
-        createObject(FLIPPER_CENTER + 130, FLIPPER_Y - 190, TYPE_BUMPER, 12);
+        // Safety bumpers near outlanes - kept at absolute position
+        createObject(FLIPPER_CENTER - 130, 470, TYPE_BUMPER, 12);
+        createObject(FLIPPER_CENTER + 130, 470, TYPE_BUMPER, 12);
 
         // Bumper grid - trimmed 3x3 per side
         const gridCols = 3;
@@ -383,7 +411,6 @@
         flipperRightWasPressed = keys.x;
 
         for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep++) {
-            const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS;
 
             flipperLeft = Math.max(-1, Math.min(1,
                 flipperLeft + (keys.z ? -0.07 : 0.05)));
@@ -443,7 +470,7 @@
 
                         // Check if all 3 lit
                         if (topLaneLights.every(l => l)) {
-                            score += 50;
+                            score += 50 * scoreMultiplier;
                             document.getElementById('score').textContent = score;
                             topLaneLights = [false, false, false];
                         }
@@ -452,6 +479,48 @@
                 }
             } else if (!inLaneZone) {
                 ballInTopLane = false;
+            }
+
+            // Spot target sensor (right side, against shooter lane)
+            for (let i = 0; i < 4; i++) {
+                if (!spotTargets[i]) {
+                    const stx = SPOT_TARGET_POSITIONS[i].x;
+                    const sty = SPOT_TARGET_POSITIONS[i].y;
+                    const sdx = ball.x - stx;
+                    const sdy = ball.y - sty;
+                    if (Math.sqrt(sdx * sdx + sdy * sdy) < BALL_RADIUS + 8) {
+                        spotTargets[i] = true;
+                        score += 3 * scoreMultiplier;
+                        document.getElementById('score').textContent = score;
+
+                        // Check if all 4 spot targets lit
+                        if (spotTargets.every(s => s)) {
+                            spotCompletions++;
+                            scoreMultiplier *= 2;
+                            spotTargets = [false, false, false, false];
+                        }
+                    }
+                }
+            }
+
+            // Lane rollover light sensor (outlanes and inlanes)
+            for (let i = 0; i < 4; i++) {
+                if (!laneLights[i]) {
+                    const llx = LANE_LIGHT_POSITIONS[i].x;
+                    const lly = LANE_LIGHT_POSITIONS[i].y;
+                    const ldx = ball.x - llx;
+                    const ldy = ball.y - lly;
+                    if (Math.sqrt(ldx * ldx + ldy * ldy) < BALL_RADIUS + 8) {
+                        laneLights[i] = true;
+
+                        // Check if all 4 lane lights lit
+                        if (laneLights.every(l => l)) {
+                            ballCount++;
+                            document.getElementById('balls').textContent = ballCount;
+                            laneLights = [false, false, false, false];
+                        }
+                    }
+                }
             }
 
             // Check if ball is lost
@@ -478,6 +547,10 @@
                             alert('Game Over! Score: ' + score);
                             score = 0;
                             ballCount = 3;
+                            scoreMultiplier = 1;
+                            spotCompletions = 0;
+                            spotTargets = [false, false, false, false];
+                            laneLights = [false, false, false, false];
                             document.getElementById('score').textContent = score;
                             document.getElementById('balls').textContent = ballCount;
                             ball.x = SHOOTER_X;
@@ -534,11 +607,11 @@
                                     dt.bounce = 10;
                                 }
                             });
-                            score += 5;
+                            score += 5 * scoreMultiplier;
                             document.getElementById('score').textContent = score;
 
                             if (dropTargets.every(dt => !dt.active)) {
-                                score += 25;
+                                score += 25 * scoreMultiplier;
                                 document.getElementById('score').textContent = score;
                                 setTimeout(() => {
                                     dropTargets.forEach(dt => { dt.active = true; });
@@ -551,16 +624,11 @@
 
                             if (obj.y < FLIPPER_Y - 80) {
                                 if (obj.isHighValue) {
-                                    score += 5;
+                                    score += 5 * scoreMultiplier;
                                 } else {
-                                    score++;
+                                    score += scoreMultiplier;
                                 }
                                 document.getElementById('score').textContent = score;
-
-                                if (score % 50 === 0) {
-                                    ballCount++;
-                                    document.getElementById('balls').textContent = ballCount;
-                                }
                             }
 
                             restitution = BUMPER_RESTITUTION;
@@ -655,7 +723,10 @@
                 }
             }
 
-            if (obj.isHighValue && obj.bounce <= 0) {
+            // Center bumper cycles color based on spot target completions
+            if (obj.isCenterBumper && obj.bounce <= 0) {
+                color = BUMPER_COLORS[spotCompletions % BUMPER_COLORS.length];
+            } else if (obj.isHighValue && obj.bounce <= 0) {
                 color = '#ff0000';
             }
 
@@ -677,6 +748,28 @@
             const lx = (TOP_LANE_PINS[i] + TOP_LANE_PINS[i + 1]) / 2;
             const litColor = topLaneLights[i] ? '#ffff00' : '#333333';
             drawCircle(lx, topLaneLightY, 5, litColor);
+        }
+
+        // Draw spot targets (right side, against shooter lane)
+        for (let i = 0; i < 4; i++) {
+            const st = SPOT_TARGET_POSITIONS[i];
+            const stColor = spotTargets[i] ? '#ff3300' : '#660000';
+            drawCircle(st.x, st.y, 6, stColor);
+        }
+
+        // Draw lane rollover lights (outlanes and inlanes)
+        for (let i = 0; i < 4; i++) {
+            const ll = LANE_LIGHT_POSITIONS[i];
+            const llColor = laneLights[i] ? '#00ff00' : '#333333';
+            drawCircle(ll.x, ll.y, 5, llColor);
+        }
+
+        // Draw score multiplier indicator if active
+        if (scoreMultiplier > 1) {
+            ctx.fillStyle = '#ff8800';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(scoreMultiplier + 'X', CENTER_X, FLIPPER_Y - 140);
         }
 
         ctx.restore();
