@@ -166,10 +166,10 @@
     // Lane rollover light positions (outlanes and inlanes)
     const LANE_LIGHT_Y = FLIPPER_Y - 35;
     const LANE_LIGHT_POSITIONS = [
-        {x: 73, y: LANE_LIGHT_Y},   // Left outlane
-        {x: 140, y: LANE_LIGHT_Y},  // Left inlane
-        {x: 196, y: LANE_LIGHT_Y},  // Right inlane
-        {x: 263, y: LANE_LIGHT_Y}   // Right outlane
+        {x: 42, y: LANE_LIGHT_Y},   // Left outlane (between table wall and lane wall)
+        {x: 73, y: LANE_LIGHT_Y},   // Left inlane (between lane wall and slingshot)
+        {x: 263, y: LANE_LIGHT_Y},  // Right inlane (between slingshot and lane wall)
+        {x: 295, y: LANE_LIGHT_Y}   // Right outlane (between lane wall and shooter wall)
     ];
 
     // === GAME STATE ===
@@ -257,8 +257,8 @@
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
 
-            // Bottom drain pin
-            createObject(FLIPPER_CENTER, FLIPPER_Y + 40);
+            // Bottom drain pin (moved down 25px so ball can drain)
+            createObject(FLIPPER_CENTER, FLIPPER_Y + 65);
 
             // Side walls
             for (let i = 0; i < 90; i++) {
@@ -285,35 +285,35 @@
                     FLIPPER_Y - 50 + i * 3);
             }
 
-            // Triangular slingshots - with 45-degree angled bottom
+            // Triangular slingshots - with 45-degree angled bottom side
             const slingInnerX = FLIPPER_CENTER + dir * FLIPPER_SPREAD;
             const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
             const slingTopY = FLIPPER_Y - 120;
             const slingBottomY = FLIPPER_Y - 70;
-            const slingBottomOuterY = slingBottomY + 25; // 45-degree angle drop
+            const slingBottomInnerY = slingBottomY + 25; // 45-degree: short side goes DOWN from outer toward inner
 
-            // Outer vertical side (wall) - extended to meet angled bottom
-            for (let i = 0; i <= 9; i++) {
-                const t = i / 9;
-                createObject(slingOuterX, slingTopY + t * (slingBottomOuterY - slingTopY));
+            // Outer vertical side (wall) - original short length
+            for (let i = 0; i <= 7; i++) {
+                const t = i / 7;
+                createObject(slingOuterX, slingTopY + t * (slingBottomY - slingTopY));
             }
 
-            // Diagonal kicking surface (bumper) - extended 15% past endpoint
+            // Diagonal kicking surface (bumper) - from top-outer to bottom-inner-lower
             for (let i = 0; i <= 12; i++) {
-                const t = i * 1.15 / 12;
+                const t = i / 12;
                 createObject(
                     slingOuterX + (slingInnerX - slingOuterX) * t,
-                    slingTopY + (slingBottomY - slingTopY) * t,
+                    slingTopY + (slingBottomInnerY - slingTopY) * t,
                     TYPE_BUMPER, 4
                 );
             }
 
-            // Bottom wall at 45-degree angle (inner to outer-lower)
+            // Bottom wall at 45-degree angle DOWN (from outer toward inner-lower)
             for (let i = 0; i <= 5; i++) {
                 const t = i / 5;
                 createObject(
-                    slingInnerX + (slingOuterX - slingInnerX) * t,
-                    slingBottomY + (slingBottomOuterY - slingBottomY) * t
+                    slingOuterX + (slingInnerX - slingOuterX) * t,
+                    slingBottomY + (slingBottomInnerY - slingBottomY) * t
                 );
             }
         }
