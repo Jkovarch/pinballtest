@@ -257,8 +257,8 @@
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
 
-            // Bottom drain pin (moved down 25px so ball can drain)
-            createObject(FLIPPER_CENTER, FLIPPER_Y + 65);
+            // Bottom drain pin
+            createObject(FLIPPER_CENTER, FLIPPER_Y + 55);
 
             // Side walls
             for (let i = 0; i < 90; i++) {
@@ -335,7 +335,7 @@
 
         // Side bumpers (30% smaller: 36 -> 25)
         createObject(FLIPPER_CENTER - 150, DOME_RADIUS + 90, TYPE_BUMPER, 25);
-        createObject(FLIPPER_CENTER + 150, DOME_RADIUS + 90, TYPE_BUMPER, 25);
+        createObject(FLIPPER_CENTER + 162, DOME_RADIUS + 90, TYPE_BUMPER, 25); // Right bumper shifted right to prevent ball stuck on top
 
         // Safety bumpers near outlanes - kept at absolute position
         createObject(FLIPPER_CENTER - 130, 470, TYPE_BUMPER, 12);
@@ -503,14 +503,14 @@
                 }
             }
 
-            // Lane rollover light sensor (outlanes and inlanes)
+            // Lane rollover light sensor (outlanes and inlanes) - wide detection for both directions
             for (let i = 0; i < 4; i++) {
                 if (!laneLights[i]) {
                     const llx = LANE_LIGHT_POSITIONS[i].x;
                     const lly = LANE_LIGHT_POSITIONS[i].y;
                     const ldx = ball.x - llx;
                     const ldy = ball.y - lly;
-                    if (Math.sqrt(ldx * ldx + ldy * ldy) < BALL_RADIUS + 8) {
+                    if (Math.abs(ldx) < 18 && Math.abs(ldy) < 18) {
                         laneLights[i] = true;
 
                         // Check if all 4 lane lights lit
