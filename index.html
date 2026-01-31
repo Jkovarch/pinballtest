@@ -163,6 +163,19 @@
     ];
     const BUMPER_COLORS = ['#ff0000', '#00ff00', '#0088ff', '#ff00ff', '#ff8800'];
 
+    // Saucer constants (ball lock under center bumper)
+    const SAUCER_X = CENTER_X;
+    const SAUCER_Y = 200; // Below center bumper
+    const SAUCER_RADIUS = 10;
+    const SAUCER_CAPTURE_SPEED = 0.15;
+    const SAUCER_HOLD_TIME = 120; // ~2 seconds at 60fps
+    const SAUCER_THRESHOLDS = [100, 500, 1000, 2000, 5000, 10000, 25000, 50000];
+
+    // Target upgrade colors (indexed by targetLevel)
+    const DROP_COLORS = ['#ffff00', '#ff8800', '#ff4400', '#ff00ff', '#00ffff', '#ffffff'];
+    const SPOT_DARK = ['#660000', '#663300', '#666600', '#006633', '#003366', '#666666'];
+    const SPOT_LIT = ['#ff3300', '#ff8800', '#ffff00', '#00ff66', '#0088ff', '#ffffff'];
+
     // Lane rollover light positions (outlanes and inlanes)
     const LANE_LIGHT_Y = FLIPPER_Y - 35;
     const LANE_LIGHT_POSITIONS = [
@@ -207,6 +220,12 @@
 
     // Lane rollover lights
     let laneLights = [false, false, false, false];
+
+    // Saucer state
+    let saucerActive = false;
+    let saucerTimer = 0;
+    let saucerLevel = 0;
+    let targetLevel = 0;
 
     // === OBJECT CREATION ===
     function createObject(x, y, type = TYPE_WALL, radius = WALL_RADIUS) {
@@ -453,6 +472,15 @@
                 }
             }
 
+            // Saucer: freeze ball if held
+            if (saucerActive) {
+                ball.x = SAUCER_X;
+                ball.y = SAUCER_Y;
+                ball.vx = 0;
+                ball.vy = 0;
+                continue; // Skip ball physics, sensors, collisions this substep
+            }
+
             // Update ball physics
             ball.x += ball.vx;
             ball.y += ball.vy;
@@ -490,7 +518,7 @@
                     const sdy = ball.y - sty;
                     if (Math.sqrt(sdx * sdx + sdy * sdy) < BALL_RADIUS + 8) {
                         spotTargets[i] = true;
-                        score += 3 * scoreMultiplier;
+                        score += (3 + targetLevel * 2) * scoreMultiplier;
                         document.getElementById('score').textContent = score;
 
                         // Check if all 4 spot targets lit
@@ -551,6 +579,10 @@
                             spotCompletions = 0;
                             spotTargets = [false, false, false, false];
                             laneLights = [false, false, false, false];
+                            saucerActive = false;
+                            saucerTimer = 0;
+                            saucerLevel = 0;
+                            targetLevel = 0;
                             document.getElementById('score').textContent = score;
                             document.getElementById('balls').textContent = ballCount;
                             ball.x = SHOOTER_X;
@@ -607,11 +639,11 @@
                                     dt.bounce = 10;
                                 }
                             });
-                            score += 5 * scoreMultiplier;
+                            score += (5 + targetLevel * 3) * scoreMultiplier;
                             document.getElementById('score').textContent = score;
 
                             if (dropTargets.every(dt => !dt.active)) {
-                                score += 25 * scoreMultiplier;
+                                score += (25 + targetLevel * 10) * scoreMultiplier;
                                 document.getElementById('score').textContent = score;
                                 setTimeout(() => {
                                     dropTargets.forEach(dt => { dt.active = true; });
@@ -646,6 +678,58 @@
                 if (obj.bounce > 0) {
                     obj.bounce--;
                 }
+            }
+
+            // Saucer capture check (end of substep)
+            if (!saucerActive) {
+                const sdx = ball.x - SAUCER_X;
+                const sdy = ball.y - SAUCER_Y;
+                const sDist = Math.sqrt(sdx * sdx + sdy * sdy);
+                const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+
+                if (sDist < SAUCER_RADIUS + BALL_RADIUS) {
+                    if (speed < SAUCER_CAPTURE_SPEED) {
+                        // Slow enough: capture ball in saucer
+                        saucerActive = true;
+                        saucerTimer = SAUCER_HOLD_TIME;
+                        ball.x = SAUCER_X;
+                        ball.y = SAUCER_Y;
+                        ball.vx = 0;
+                        ball.vy = 0;
+                    } else {
+                        // Too fast: slight redirect away from saucer center
+                        if (sDist > 0) {
+                            ball.vx += (sdx / sDist) * 0.003;
+                            ball.vy += (sdy / sDist) * 0.003;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Saucer timer (per frame, not per substep)
+        if (saucerActive) {
+            saucerTimer--;
+            if (saucerTimer <= 0) {
+                saucerActive = false;
+                const threshold = saucerLevel < SAUCER_THRESHOLDS.length
+                    ? SAUCER_THRESHOLDS[saucerLevel]
+                    : SAUCER_THRESHOLDS[SAUCER_THRESHOLDS.length - 1] * 2;
+
+                if (score >= threshold) {
+                    // Full reward: upgrade targets
+                    targetLevel++;
+                    saucerLevel++;
+                    score += 50 * scoreMultiplier;
+                } else {
+                    // Regular bonus only
+                    score += 15 * scoreMultiplier;
+                }
+                document.getElementById('score').textContent = score;
+
+                // Kick ball out with slight random angle
+                ball.vy = -0.4;
+                ball.vx = (Math.random() - 0.5) * 0.15;
             }
         }
     }
@@ -719,7 +803,7 @@
                 } else if (obj.bounce > 0) {
                     color = '#ffffff';
                 } else {
-                    color = '#ffff00';
+                    color = DROP_COLORS[targetLevel % DROP_COLORS.length];
                 }
             }
 
@@ -753,7 +837,9 @@
         // Draw spot targets (right side, against shooter lane)
         for (let i = 0; i < 4; i++) {
             const st = SPOT_TARGET_POSITIONS[i];
-            const stColor = spotTargets[i] ? '#ff3300' : '#660000';
+            const stColor = spotTargets[i]
+                ? SPOT_LIT[targetLevel % SPOT_LIT.length]
+                : SPOT_DARK[targetLevel % SPOT_DARK.length];
             drawCircle(st.x, st.y, 6, stColor);
         }
 
@@ -762,6 +848,26 @@
             const ll = LANE_LIGHT_POSITIONS[i];
             const llColor = laneLights[i] ? '#00ff00' : '#333333';
             drawCircle(ll.x, ll.y, 5, llColor);
+        }
+
+        // Draw saucer (grey circle outline)
+        ctx.strokeStyle = saucerActive
+            ? (frame % 10 < 5 ? '#ffffff' : '#aaaaaa')
+            : '#555555';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(SAUCER_X, SAUCER_Y, SAUCER_RADIUS, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Show next saucer threshold
+        if (!saucerActive) {
+            const nextThreshold = saucerLevel < SAUCER_THRESHOLDS.length
+                ? SAUCER_THRESHOLDS[saucerLevel]
+                : SAUCER_THRESHOLDS[SAUCER_THRESHOLDS.length - 1] * 2;
+            ctx.fillStyle = '#555555';
+            ctx.font = '8px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(nextThreshold, SAUCER_X, SAUCER_Y + 3);
         }
 
         // Draw score multiplier indicator if active
