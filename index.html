@@ -110,7 +110,7 @@
     <!-- Instructions -->
     <div id="instructions">
         <h1>NEON PINBALL</h1>
-        <p>Keyboard: <span class="key">Z</span> Left <span class="key">X</span> Right <span class="key">C</span> Launch</p>
+        <p>Keyboard: <span class="key">L-SHIFT</span> Left <span class="key">R-SHIFT</span> Right <span class="key">SPACE</span> Launch</p>
         <p>Touch: Left/Right sides for flippers</p>
         <p>Swipe down to pull and release launcher</p>
     </div>
@@ -128,16 +128,16 @@
     // === CONSTANTS ===
     const TABLE_WIDTH = 400;
     const TABLE_HEIGHT = 700;
-    const CENTER_X = TABLE_WIDTH / 2 - 20; // Shift left for shooter lane
+    const CENTER_X = TABLE_WIDTH / 2 - 20;
     const BALL_RADIUS = 7;
     const WALL_RADIUS = 5;
     const DOME_RADIUS = 150;
     const FLIPPER_RADIUS = 10;
     const FLIPPER_SEGMENTS = 45;
     const FLIPPER_SPREAD = 55;
-    const FLIPPER_Y = TABLE_HEIGHT - 60; // Lane wall reference (moved up 20px)
-    const FLIPPER_Y_ACTUAL = FLIPPER_Y + 14; // Flippers sit 1 ball-width below lane walls
-    const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS; // 168
+    const FLIPPER_Y = TABLE_HEIGHT - 60;
+    const FLIPPER_Y_ACTUAL = FLIPPER_Y + 14;
+    const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS;
     const SHOOTER_X = CENTER_X + DOME_RADIUS - BALL_RADIUS;
     const SHOOTER_Y = TABLE_HEIGHT - 60;
     const RESTITUTION = 1.3;
@@ -145,45 +145,44 @@
     const PHYSICS_SUBSTEPS = 9;
     const GRAVITY = 0.0017;
 
-    // Top lane constants
     const TOP_LANE_Y = 55;
     const TOP_LANE_PINS = [CENTER_X - 60, CENTER_X - 20, CENTER_X + 20, CENTER_X + 60];
 
-    // Object types
     const TYPE_WALL = 0;
     const TYPE_BUMPER = 1;
     const TYPE_DROP_TARGET = 2;
 
-    // Spot target positions (right side, against shooter lane wall)
     const SPOT_TARGET_POSITIONS = [
-        {x: 300, y: 280},
-        {x: 300, y: 320},
-        {x: 300, y: 360},
-        {x: 300, y: 400}
+        {x: 300, y: 280}, {x: 300, y: 320}, {x: 300, y: 360}, {x: 300, y: 400}
     ];
     const BUMPER_COLORS = ['#ff0000', '#00ff00', '#0088ff', '#ff00ff', '#ff8800'];
 
-    // Saucer constants (ball lock under center bumper)
     const SAUCER_X = CENTER_X;
-    const SAUCER_Y = 200; // Below center bumper
+    const SAUCER_Y = 200;
     const SAUCER_RADIUS = 10;
     const SAUCER_CAPTURE_SPEED = 0.15;
-    const SAUCER_HOLD_TIME = 120; // ~2 seconds at 60fps
+    const SAUCER_HOLD_TIME = 120;
     const SAUCER_THRESHOLDS = [100, 500, 1000, 2000, 5000, 10000, 25000, 50000];
 
-    // Target upgrade colors (indexed by targetLevel)
     const DROP_COLORS = ['#ffff00', '#ff8800', '#ff4400', '#ff00ff', '#00ffff', '#ffffff'];
     const SPOT_DARK = ['#660000', '#663300', '#666600', '#006633', '#003366', '#666666'];
     const SPOT_LIT = ['#ff3300', '#ff8800', '#ffff00', '#00ff66', '#0088ff', '#ffffff'];
 
-    // Lane rollover light positions (outlanes and inlanes)
     const LANE_LIGHT_Y = FLIPPER_Y - 35;
     const LANE_LIGHT_POSITIONS = [
-        {x: 42, y: LANE_LIGHT_Y},   // Left outlane (between table wall and lane wall)
-        {x: 73, y: LANE_LIGHT_Y},   // Left inlane (between lane wall and slingshot)
-        {x: 263, y: LANE_LIGHT_Y},  // Right inlane (between slingshot and lane wall)
-        {x: 295, y: LANE_LIGHT_Y}   // Right outlane (between lane wall and shooter wall)
+        {x: 42, y: LANE_LIGHT_Y}, {x: 73, y: LANE_LIGHT_Y},
+        {x: 263, y: LANE_LIGHT_Y}, {x: 295, y: LANE_LIGHT_Y}
     ];
+
+    // Game states
+    const STATE_PLAYING = 0;
+    const STATE_GAME_OVER = 1;
+    const STATE_ENTER_INITIALS = 2;
+    const STATE_MENU = 3;
+    const STATE_LEADERBOARD = 4;
+
+    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const MAX_HIGH_SCORES = 10;
 
     // === GAME STATE ===
     let objects = [];
@@ -195,48 +194,148 @@
     let offsetX = 0;
     let offsetY = 0;
 
-    // Flipper angles
     let flipperLeft = 1;
     let flipperRight = 1;
     let keys = { z: false, x: false, c: false };
 
-    // Swipe detection
     let swipeStartY = 0;
     let isSwiping = false;
 
-    // Drop targets
     let dropTargets = [];
 
-    // Top lane rolling lights
     let topLaneLights = [false, false, false];
     let ballInTopLane = false;
     let flipperLeftWasPressed = false;
     let flipperRightWasPressed = false;
 
-    // Spot targets (right side)
     let spotTargets = [false, false, false, false];
     let spotCompletions = 0;
     let scoreMultiplier = 1;
 
-    // Lane rollover lights
     let laneLights = [false, false, false, false];
 
-    // Saucer state
     let saucerActive = false;
     let saucerTimer = 0;
     let saucerLevel = 0;
     let targetLevel = 0;
 
+    // UI state
+    let gameState = STATE_PLAYING;
+    let gameOverTimer = 0;
+    let finalScore = 0;
+    let isNewHighScore = false;
+    let initialsChars = [0, 0, 0];
+    let currentInitialPos = 0;
+    let prevMenuKeys = { z: false, x: false };
+    let bothPressedPrev = false;
+    let highScores = [];
+    let particles = [];
+
+    // === HIGH SCORE FUNCTIONS ===
+    function loadHighScores() {
+        try {
+            const saved = localStorage.getItem('neonPinballHighScores');
+            if (saved) highScores = JSON.parse(saved);
+        } catch (e) { highScores = []; }
+    }
+
+    function saveHighScores() {
+        try {
+            localStorage.setItem('neonPinballHighScores', JSON.stringify(highScores));
+        } catch (e) {}
+    }
+
+    function checkHighScore(s) {
+        if (s <= 0) return false;
+        if (highScores.length < MAX_HIGH_SCORES) return true;
+        return s > highScores[highScores.length - 1].score;
+    }
+
+    function addHighScore(initials, s) {
+        highScores.push({ initials: initials, score: s, date: new Date().toISOString() });
+        highScores.sort((a, b) => b.score - a.score);
+        if (highScores.length > MAX_HIGH_SCORES) highScores = highScores.slice(0, MAX_HIGH_SCORES);
+        saveHighScores();
+    }
+
+    // === PARTICLES ===
+    function createParticles(x, y, count) {
+        const colors = ['#ff00ff', '#00ffff', '#ffff00', '#ff0000', '#00ff00', '#ff8800'];
+        for (let i = 0; i < count; i++) {
+            particles.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 5,
+                vy: (Math.random() - 0.5) * 5 - 1,
+                life: 40 + Math.random() * 80,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                radius: 1 + Math.random() * 3
+            });
+        }
+    }
+
+    function createFirework(x, y) {
+        const colors = ['#ff00ff', '#00ffff', '#ffff00', '#ff0000', '#00ff00'];
+        for (let i = 0; i < 20; i++) {
+            const angle = (Math.PI * 2 * i) / 20;
+            const speed = 1 + Math.random() * 2;
+            particles.push({
+                x: x, y: y,
+                vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+                life: 30 + Math.random() * 40,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                radius: 1 + Math.random() * 2
+            });
+        }
+    }
+
+    // === RESET GAME ===
+    function resetGame() {
+        score = 0;
+        ballCount = 3;
+        scoreMultiplier = 1;
+        spotCompletions = 0;
+        spotTargets = [false, false, false, false];
+        laneLights = [false, false, false, false];
+        saucerActive = false;
+        saucerTimer = 0;
+        saucerLevel = 0;
+        targetLevel = 0;
+        topLaneLights = [false, false, false];
+        particles = [];
+
+        const ball = objects[0];
+        ball.x = SHOOTER_X;
+        ball.y = SHOOTER_Y - 20;
+        ball.vx = 0;
+        ball.vy = 0;
+
+        const goStart = 1 + FLIPPER_SEGMENTS * 2;
+        for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
+            const seg = objects[goStart + si];
+            if (seg && seg.isShooter) {
+                seg.y = SHOOTER_Y + si;
+                seg.vy = 0;
+            }
+        }
+
+        dropTargets.forEach(dt => { dt.active = true; });
+
+        document.getElementById('score').textContent = score;
+        document.getElementById('balls').textContent = ballCount;
+        document.getElementById('instructions').classList.remove('hidden');
+
+        gameStarted = false;
+        gameState = STATE_PLAYING;
+        keys.z = false;
+        keys.x = false;
+        keys.c = false;
+    }
+
     // === OBJECT CREATION ===
     function createObject(x, y, type = TYPE_WALL, radius = WALL_RADIUS) {
         objects.push({
-            x: x,
-            y: y,
-            type: type,
-            radius: radius,
-            vx: 0,
-            vy: 0,
-            bounce: 0,
+            x: x, y: y, type: type, radius: radius,
+            vx: 0, vy: 0, bounce: 0,
             color: type === TYPE_BUMPER ? '#ff00ff' : type === TYPE_DROP_TARGET ? '#ffff00' : '#00ffff'
         });
         return objects[objects.length - 1];
@@ -247,44 +346,33 @@
         objects = [];
         dropTargets = [];
 
-        // Ball (index 0) - starts in shooter lane
         const ball = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS, SHOOTER_Y - 20);
         ball.radius = BALL_RADIUS;
         ball.color = '#ffffff';
         ball.isBall = true;
 
-        // Flipper segments (left: 1-45, right: 46-90)
         for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
             createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
             createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
         }
 
-        // Shooter segments
         for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
-            const shooter = createObject(
-                CENTER_X + DOME_RADIUS - BALL_RADIUS,
-                TABLE_HEIGHT - 10 + i,
-                TYPE_WALL, 5
-            );
+            const shooter = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS, TABLE_HEIGHT - 10 + i, TYPE_WALL, 5);
             shooter.isShooter = true;
             shooter.shooterIndex = i;
         }
 
-        // Build symmetric elements
         const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
 
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
 
-            // Bottom drain pin
             createObject(FLIPPER_CENTER, FLIPPER_Y + 55);
 
-            // Side walls
             for (let i = 0; i < 90; i++) {
                 createObject(CENTER_X + dir * DOME_BOTH, TABLE_HEIGHT - 7 * i);
             }
 
-            // Top dome arc
             for (let i = 0; i < 55; i++) {
                 createObject(
                     CENTER_X + dir * DOME_BOTH * Math.cos(i / 35),
@@ -292,32 +380,25 @@
                 );
             }
 
-            // Flipper lane side walls - shortened for wider outlanes
             for (let i = 0; i < 12; i++) {
-                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55),
-                    FLIPPER_Y - 50 - i * 7);
+                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50 - i * 7);
             }
 
-            // Flipper lane bottom angled walls
             for (let i = 0; i < 19; i++) {
-                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55 - i * 3),
-                    FLIPPER_Y - 50 + i * 3);
+                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55 - i * 3), FLIPPER_Y - 50 + i * 3);
             }
 
-            // Triangular slingshots - with 45-degree angled bottom side
             const slingInnerX = FLIPPER_CENTER + dir * FLIPPER_SPREAD;
             const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
             const slingTopY = FLIPPER_Y - 120;
             const slingBottomY = FLIPPER_Y - 70;
-            const slingBottomInnerY = slingBottomY + 25; // 45-degree: short side goes DOWN from outer toward inner
+            const slingBottomInnerY = slingBottomY + 25;
 
-            // Outer vertical side (wall) - original short length
             for (let i = 0; i <= 7; i++) {
                 const t = i / 7;
                 createObject(slingOuterX, slingTopY + t * (slingBottomY - slingTopY));
             }
 
-            // Diagonal kicking surface (bumper) - from top-outer to bottom-inner-lower
             for (let i = 0; i <= 12; i++) {
                 const t = i / 12;
                 createObject(
@@ -327,7 +408,6 @@
                 );
             }
 
-            // Bottom wall at 45-degree angle DOWN (from outer toward inner-lower)
             for (let i = 0; i <= 5; i++) {
                 const t = i / 5;
                 createObject(
@@ -337,53 +417,34 @@
             }
         }
 
-        // === BUMPERS ===
-
-        // Center score bumper - RED high value target
         const bumperY = 160;
         const centerBumper = createObject(CENTER_X, bumperY, TYPE_BUMPER, 12);
         centerBumper.isHighValue = true;
         centerBumper.isCenterBumper = true;
         centerBumper.color = '#ff0000';
 
-        // Clover bumpers - bottom pair moved down 2 widths
         createObject(CENTER_X - 45, bumperY - 45, TYPE_BUMPER, 24);
         createObject(CENTER_X + 45, bumperY - 45, TYPE_BUMPER, 24);
         createObject(CENTER_X - 45, bumperY + 93, TYPE_BUMPER, 24);
         createObject(CENTER_X + 45, bumperY + 93, TYPE_BUMPER, 24);
 
-        // Side bumpers (30% smaller: 36 -> 25)
         createObject(FLIPPER_CENTER - 150, DOME_RADIUS + 90, TYPE_BUMPER, 25);
-        createObject(FLIPPER_CENTER + 162, DOME_RADIUS + 90, TYPE_BUMPER, 25); // Right bumper shifted right to prevent ball stuck on top
+        createObject(FLIPPER_CENTER + 162, DOME_RADIUS + 90, TYPE_BUMPER, 25);
 
-        // Safety bumpers near outlanes - kept at absolute position
         createObject(FLIPPER_CENTER - 130, 470, TYPE_BUMPER, 12);
         createObject(FLIPPER_CENTER + 130, 470, TYPE_BUMPER, 12);
 
-        // Bumper grid - trimmed 3x3 per side
-        const gridCols = 3;
-        const gridRows = 3;
-        const gridSpacingX = 26;
-        const gridSpacingY = 28;
         const gridStartY = bumperY + 170;
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
-            for (let row = 0; row < gridRows; row++) {
-                for (let col = 0; col < gridCols; col++) {
-                    const pin = createObject(
-                        CENTER_X + col * gridSpacingX * dir,
-                        gridStartY - row * gridSpacingY,
-                        TYPE_BUMPER, 4
-                    );
-                    if (col === 0 && row === 1) {
-                        pin.isHighValue = true;
-                        pin.color = '#ff0000';
-                    }
+            for (let row = 0; row < 3; row++) {
+                for (let col = 0; col < 3; col++) {
+                    const pin = createObject(CENTER_X + col * 26 * dir, gridStartY - row * 28, TYPE_BUMPER, 4);
+                    if (col === 0 && row === 1) { pin.isHighValue = true; pin.color = '#ff0000'; }
                 }
             }
         }
 
-        // === DROP TARGETS - vertical along left wall, 2 circles each ===
         const dtBaseX = 42;
         const dtBaseY = 300;
         for (let row = 0; row < 4; row++) {
@@ -397,12 +458,10 @@
             }
         }
 
-        // === TOP LANE - 4 pins with 3 rolling lights ===
         for (let i = 0; i < 4; i++) {
             createObject(TOP_LANE_PINS[i], TOP_LANE_Y, TYPE_WALL, 5);
         }
 
-        // Shooter lane inner wall - extended up under pop bumper
         const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
         for (let i = 0; i < 65; i++) {
             createObject(shooterWallX, TABLE_HEIGHT - 7 * i);
@@ -413,16 +472,13 @@
     function updatePhysics() {
         const ball = objects[0];
 
-        // Detect flipper press transitions for light rolling
         const leftJustPressed = keys.z && !flipperLeftWasPressed;
         const rightJustPressed = keys.x && !flipperRightWasPressed;
 
         if (leftJustPressed && topLaneLights.some(l => l)) {
-            // Rotate lights left (shift pattern left, wrap around)
             topLaneLights = [topLaneLights[1], topLaneLights[2], topLaneLights[0]];
         }
         if (rightJustPressed && topLaneLights.some(l => l)) {
-            // Rotate lights right (shift pattern right, wrap around)
             topLaneLights = [topLaneLights[2], topLaneLights[0], topLaneLights[1]];
         }
 
@@ -431,13 +487,9 @@
 
         for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep++) {
 
-            flipperLeft = Math.max(-1, Math.min(1,
-                flipperLeft + (keys.z ? -0.07 : 0.05)));
+            flipperLeft = Math.max(-1, Math.min(1, flipperLeft + (keys.z ? -0.07 : 0.05)));
+            flipperRight = Math.max(-1, Math.min(1, flipperRight + (keys.x ? -0.07 : 0.05)));
 
-            flipperRight = Math.max(-1, Math.min(1,
-                flipperRight + (keys.x ? -0.07 : 0.05)));
-
-            // Update flipper segment positions - using FLIPPER_Y_ACTUAL
             for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
                 const leftObj = objects[1 + i];
                 const prevLeftX = leftObj.x;
@@ -458,7 +510,6 @@
                 rightObj.radius = FLIPPER_RADIUS - i / 7;
             }
 
-            // Update shooter
             const shooterStart = 1 + FLIPPER_SEGMENTS * 2;
             const SHOOTER_MAX = TABLE_HEIGHT - 10;
             for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
@@ -472,21 +523,18 @@
                 }
             }
 
-            // Saucer: freeze ball if held
             if (saucerActive) {
                 ball.x = SAUCER_X;
                 ball.y = SAUCER_Y;
                 ball.vx = 0;
                 ball.vy = 0;
-                continue; // Skip ball physics, sensors, collisions this substep
+                continue;
             }
 
-            // Update ball physics
             ball.x += ball.vx;
             ball.y += ball.vy;
             ball.vy += GRAVITY;
 
-            // Top lane light sensor
             const inLaneZone = Math.abs(ball.y - TOP_LANE_Y) < BALL_RADIUS + 5;
             if (inLaneZone && !ballInTopLane) {
                 ballInTopLane = true;
@@ -495,8 +543,6 @@
                     const gapRight = TOP_LANE_PINS[g + 1] - 6;
                     if (ball.x > gapLeft && ball.x < gapRight) {
                         topLaneLights[g] = true;
-
-                        // Check if all 3 lit
                         if (topLaneLights.every(l => l)) {
                             score += 50 * scoreMultiplier;
                             document.getElementById('score').textContent = score;
@@ -509,7 +555,6 @@
                 ballInTopLane = false;
             }
 
-            // Spot target sensor (right side, against shooter lane)
             for (let i = 0; i < 4; i++) {
                 if (!spotTargets[i]) {
                     const stx = SPOT_TARGET_POSITIONS[i].x;
@@ -520,8 +565,6 @@
                         spotTargets[i] = true;
                         score += (3 + targetLevel * 2) * scoreMultiplier;
                         document.getElementById('score').textContent = score;
-
-                        // Check if all 4 spot targets lit
                         if (spotTargets.every(s => s)) {
                             spotCompletions++;
                             scoreMultiplier *= 2;
@@ -531,7 +574,6 @@
                 }
             }
 
-            // Lane rollover light sensor (outlanes and inlanes) - wide detection for both directions
             for (let i = 0; i < 4; i++) {
                 if (!laneLights[i]) {
                     const llx = LANE_LIGHT_POSITIONS[i].x;
@@ -540,8 +582,6 @@
                     const ldy = ball.y - lly;
                     if (Math.abs(ldx) < 18 && Math.abs(ldy) < 18) {
                         laneLights[i] = true;
-
-                        // Check if all 4 lane lights lit
                         if (laneLights.every(l => l)) {
                             ballCount++;
                             document.getElementById('balls').textContent = ballCount;
@@ -571,37 +611,18 @@
                             }
                         }
                     } else {
-                        setTimeout(() => {
-                            alert('Game Over! Score: ' + score);
-                            score = 0;
-                            ballCount = 3;
-                            scoreMultiplier = 1;
-                            spotCompletions = 0;
-                            spotTargets = [false, false, false, false];
-                            laneLights = [false, false, false, false];
-                            saucerActive = false;
-                            saucerTimer = 0;
-                            saucerLevel = 0;
-                            targetLevel = 0;
-                            document.getElementById('score').textContent = score;
-                            document.getElementById('balls').textContent = ballCount;
-                            ball.x = SHOOTER_X;
-                            ball.y = SHOOTER_Y - 20;
-                            ball.vx = 0;
-                            ball.vy = 0;
-                            gameStarted = false;
-                            const goStart = 1 + FLIPPER_SEGMENTS * 2;
-                            for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
-                                const seg = objects[goStart + si];
-                                if (seg && seg.isShooter) {
-                                    seg.y = SHOOTER_Y + si;
-                                    seg.vy = 0;
-                                }
-                            }
-                            dropTargets.forEach(dt => { dt.active = true; });
-                            topLaneLights = [false, false, false];
-                            document.getElementById('instructions').classList.remove('hidden');
-                        }, 500);
+                        // Game over - transition to in-game overlay
+                        finalScore = score;
+                        isNewHighScore = checkHighScore(score);
+                        gameState = STATE_GAME_OVER;
+                        gameOverTimer = 90;
+                        ball.x = -100;
+                        ball.y = -100;
+                        ball.vx = 0;
+                        ball.vy = 0;
+                        if (isNewHighScore) {
+                            createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 3, 60);
+                        }
                     }
                 }
             }
@@ -609,7 +630,6 @@
             // Collision detection
             for (let i = 1; i < objects.length; i++) {
                 const obj = objects[i];
-
                 if (obj.isDropTarget && !obj.active) continue;
 
                 const dx = ball.x - obj.x;
@@ -628,41 +648,28 @@
                         ball.y += (dy / dist) * overlap;
 
                         const tangent = dist * dist / (relVy * dx - relVx * dy);
-
                         let restitution;
 
                         if (obj.isDropTarget && obj.active && !obj.bounce) {
                             obj.bounce = 10;
                             dropTargets.forEach(dt => {
-                                if (dt.dropGroup === obj.dropGroup) {
-                                    dt.active = false;
-                                    dt.bounce = 10;
-                                }
+                                if (dt.dropGroup === obj.dropGroup) { dt.active = false; dt.bounce = 10; }
                             });
                             score += (5 + targetLevel * 3) * scoreMultiplier;
                             document.getElementById('score').textContent = score;
-
                             if (dropTargets.every(dt => !dt.active)) {
                                 score += (25 + targetLevel * 10) * scoreMultiplier;
                                 document.getElementById('score').textContent = score;
-                                setTimeout(() => {
-                                    dropTargets.forEach(dt => { dt.active = true; });
-                                }, 1500);
+                                setTimeout(() => { dropTargets.forEach(dt => { dt.active = true; }); }, 1500);
                             }
-
                             restitution = BUMPER_RESTITUTION;
                         } else if (obj.type === TYPE_BUMPER && !obj.bounce) {
                             obj.bounce = 10;
-
                             if (obj.y < FLIPPER_Y - 80) {
-                                if (obj.isHighValue) {
-                                    score += 5 * scoreMultiplier;
-                                } else {
-                                    score += scoreMultiplier;
-                                }
+                                if (obj.isHighValue) { score += 5 * scoreMultiplier; }
+                                else { score += scoreMultiplier; }
                                 document.getElementById('score').textContent = score;
                             }
-
                             restitution = BUMPER_RESTITUTION;
                         } else {
                             restitution = RESTITUTION;
@@ -670,44 +677,35 @@
 
                         ball.vx += (relVx + dy / tangent) * restitution;
                         ball.vy += (relVy - dx / tangent) * restitution;
-
                         gameStarted = true;
                     }
                 }
-
-                if (obj.bounce > 0) {
-                    obj.bounce--;
-                }
+                if (obj.bounce > 0) { obj.bounce--; }
             }
 
-            // Saucer capture check (end of substep)
+            // Saucer capture check
             if (!saucerActive) {
                 const sdx = ball.x - SAUCER_X;
                 const sdy = ball.y - SAUCER_Y;
                 const sDist = Math.sqrt(sdx * sdx + sdy * sdy);
                 const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
-
                 if (sDist < SAUCER_RADIUS + BALL_RADIUS) {
                     if (speed < SAUCER_CAPTURE_SPEED) {
-                        // Slow enough: capture ball in saucer
                         saucerActive = true;
                         saucerTimer = SAUCER_HOLD_TIME;
                         ball.x = SAUCER_X;
                         ball.y = SAUCER_Y;
                         ball.vx = 0;
                         ball.vy = 0;
-                    } else {
-                        // Too fast: slight redirect away from saucer center
-                        if (sDist > 0) {
-                            ball.vx += (sdx / sDist) * 0.003;
-                            ball.vy += (sdy / sDist) * 0.003;
-                        }
+                    } else if (sDist > 0) {
+                        ball.vx += (sdx / sDist) * 0.003;
+                        ball.vy += (sdy / sDist) * 0.003;
                     }
                 }
             }
         }
 
-        // Saucer timer (per frame, not per substep)
+        // Saucer timer (per frame)
         if (saucerActive) {
             saucerTimer--;
             if (saucerTimer <= 0) {
@@ -715,22 +713,273 @@
                 const threshold = saucerLevel < SAUCER_THRESHOLDS.length
                     ? SAUCER_THRESHOLDS[saucerLevel]
                     : SAUCER_THRESHOLDS[SAUCER_THRESHOLDS.length - 1] * 2;
-
                 if (score >= threshold) {
-                    // Full reward: upgrade targets
                     targetLevel++;
                     saucerLevel++;
                     score += 50 * scoreMultiplier;
                 } else {
-                    // Regular bonus only
                     score += 15 * scoreMultiplier;
                 }
                 document.getElementById('score').textContent = score;
-
-                // Kick ball out with slight random angle
+                const ball = objects[0];
                 ball.vy = -0.4;
                 ball.vx = (Math.random() - 0.5) * 0.15;
             }
+        }
+    }
+
+    // === MENU STATE UPDATE ===
+    function updateMenuState() {
+        // Update particles
+        particles = particles.filter(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.03;
+            p.life--;
+            return p.life > 0;
+        });
+
+        const leftJust = keys.z && !prevMenuKeys.z;
+        const rightJust = keys.x && !prevMenuKeys.x;
+        const bothDown = keys.z && keys.x;
+        const bothJust = bothDown && !bothPressedPrev;
+
+        if (gameState === STATE_GAME_OVER) {
+            gameOverTimer--;
+            if (gameOverTimer <= 0) {
+                if (isNewHighScore) {
+                    gameState = STATE_ENTER_INITIALS;
+                    initialsChars = [0, 0, 0];
+                    currentInitialPos = 0;
+                    createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
+                } else {
+                    gameState = STATE_MENU;
+                }
+            }
+        }
+
+        else if (gameState === STATE_ENTER_INITIALS) {
+            if (frame % 40 === 0) {
+                createFirework(
+                    60 + Math.random() * (TABLE_WIDTH - 120),
+                    40 + Math.random() * (TABLE_HEIGHT / 3)
+                );
+            }
+            if (bothJust) {
+                currentInitialPos++;
+                if (currentInitialPos >= 3) {
+                    const initials = ALPHABET[initialsChars[0]] + ALPHABET[initialsChars[1]] + ALPHABET[initialsChars[2]];
+                    addHighScore(initials, finalScore);
+                    gameState = STATE_MENU;
+                    createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 40);
+                }
+            } else if (leftJust && !keys.x) {
+                initialsChars[currentInitialPos] = (initialsChars[currentInitialPos] + 25) % 26;
+            } else if (rightJust && !keys.z) {
+                initialsChars[currentInitialPos] = (initialsChars[currentInitialPos] + 1) % 26;
+            }
+        }
+
+        else if (gameState === STATE_MENU) {
+            if (leftJust && !keys.x) {
+                gameState = STATE_LEADERBOARD;
+            } else if (rightJust && !keys.z) {
+                resetGame();
+            }
+        }
+
+        else if (gameState === STATE_LEADERBOARD) {
+            if (leftJust || rightJust) {
+                gameState = STATE_MENU;
+            }
+        }
+
+        bothPressedPrev = bothDown;
+        prevMenuKeys = { z: keys.z, x: keys.x };
+    }
+
+    // === DRAW OVERLAY ===
+    function drawOverlay() {
+        if (gameState === STATE_GAME_OVER) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 32px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 24px Arial';
+            ctx.fillText(finalScore.toString(), TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 40);
+
+            if (isNewHighScore && frame % 20 < 14) {
+                ctx.fillStyle = '#ffff00';
+                ctx.font = 'bold 18px Arial';
+                ctx.fillText('NEW HIGH SCORE!', TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 75);
+            }
+        }
+
+        else if (gameState === STATE_ENTER_INITIALS) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+            ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
+            if (frame % 30 < 22) {
+                ctx.fillStyle = frame % 60 < 30 ? '#ff00ff' : '#00ffff';
+                ctx.font = 'bold 26px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('NEW HIGH SCORE!', TABLE_WIDTH / 2, TABLE_HEIGHT / 4 - 10);
+            }
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 28px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(finalScore.toString(), TABLE_WIDTH / 2, TABLE_HEIGHT / 4 + 30);
+
+            ctx.fillStyle = '#888888';
+            ctx.font = '14px Arial';
+            ctx.fillText('ENTER YOUR INITIALS', TABLE_WIDTH / 2, TABLE_HEIGHT / 2 - 55);
+
+            const boxW = 44;
+            const boxH = 52;
+            const boxGap = 12;
+            const totalW = boxW * 3 + boxGap * 2;
+            const startX = (TABLE_WIDTH - totalW) / 2;
+            const boxY = TABLE_HEIGHT / 2 - 25;
+
+            for (let i = 0; i < 3; i++) {
+                const bx = startX + i * (boxW + boxGap);
+                const isActive = i === currentInitialPos;
+                const isConfirmed = i < currentInitialPos;
+
+                ctx.strokeStyle = isActive ? '#00ffff' : (isConfirmed ? '#ff00ff' : '#444444');
+                ctx.lineWidth = isActive ? 3 : 2;
+                ctx.strokeRect(bx, boxY, boxW, boxH);
+
+                if (isConfirmed) {
+                    ctx.fillStyle = 'rgba(255, 0, 255, 0.15)';
+                    ctx.fillRect(bx, boxY, boxW, boxH);
+                }
+
+                let letter;
+                if (isConfirmed) { letter = ALPHABET[initialsChars[i]]; }
+                else if (isActive) { letter = ALPHABET[initialsChars[i]]; }
+                else { letter = '_'; }
+
+                ctx.fillStyle = isActive ? '#00ffff' : (isConfirmed ? '#ff00ff' : '#555555');
+                ctx.font = 'bold 30px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(letter, bx + boxW / 2, boxY + 37);
+
+                if (isActive) {
+                    ctx.fillStyle = '#ff00ff';
+                    ctx.font = '16px Arial';
+                    ctx.fillText('\u25B2', bx + boxW / 2, boxY - 8);
+                    ctx.fillText('\u25BC', bx + boxW / 2, boxY + boxH + 18);
+                }
+            }
+
+            ctx.fillStyle = '#666666';
+            ctx.font = '11px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('LEFT / RIGHT: SCROLL', TABLE_WIDTH / 2, boxY + boxH + 42);
+            ctx.fillText('BOTH: CONFIRM LETTER', TABLE_WIDTH / 2, boxY + boxH + 57);
+        }
+
+        else if (gameState === STATE_MENU) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+            ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '18px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('FINAL SCORE', TABLE_WIDTH / 2, TABLE_HEIGHT / 3 - 20);
+
+            ctx.fillStyle = '#ffff00';
+            ctx.font = 'bold 30px Arial';
+            ctx.fillText(finalScore.toString(), TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 15);
+
+            const btnY = TABLE_HEIGHT / 2 + 10;
+            const btnW = 130;
+            const btnH = 50;
+            const gap = 16;
+
+            const leftBtnX = TABLE_WIDTH / 2 - btnW - gap / 2;
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(leftBtnX, btnY, btnW, btnH);
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 18px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('SCORES', leftBtnX + btnW / 2, btnY + 32);
+
+            const rightBtnX = TABLE_WIDTH / 2 + gap / 2;
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(rightBtnX, btnY, btnW, btnH);
+            ctx.fillStyle = '#00ffff';
+            ctx.font = 'bold 18px Arial';
+            ctx.fillText('PLAY', rightBtnX + btnW / 2, btnY + 32);
+
+            ctx.fillStyle = '#666666';
+            ctx.font = '11px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('LEFT: SCORES    RIGHT: PLAY AGAIN', TABLE_WIDTH / 2, btnY + btnH + 30);
+        }
+
+        else if (gameState === STATE_LEADERBOARD) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+            ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 26px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('HIGH SCORES', TABLE_WIDTH / 2, 70);
+
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(TABLE_WIDTH / 2 - 80, 80);
+            ctx.lineTo(TABLE_WIDTH / 2 + 80, 80);
+            ctx.stroke();
+
+            if (highScores.length === 0) {
+                ctx.fillStyle = '#555555';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('NO SCORES YET', TABLE_WIDTH / 2, 180);
+            } else {
+                for (let i = 0; i < highScores.length && i < MAX_HIGH_SCORES; i++) {
+                    const hs = highScores[i];
+                    const y = 115 + i * 35;
+
+                    ctx.fillStyle = '#888888';
+                    ctx.font = '14px Arial';
+                    ctx.textAlign = 'right';
+                    ctx.fillText((i + 1) + '.', TABLE_WIDTH / 2 - 90, y);
+
+                    ctx.fillStyle = '#00ffff';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(hs.initials, TABLE_WIDTH / 2 - 75, y);
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = '14px Arial';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(hs.score.toString(), TABLE_WIDTH / 2 + 90, y);
+
+                    const d = new Date(hs.date);
+                    ctx.fillStyle = '#555555';
+                    ctx.font = '10px Arial';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(d.toLocaleDateString(), TABLE_WIDTH / 2 + 90, y + 13);
+                }
+            }
+
+            ctx.fillStyle = '#666666';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('PRESS ANY BUTTON TO RETURN', TABLE_WIDTH / 2, TABLE_HEIGHT - 40);
         }
     }
 
@@ -759,107 +1008,71 @@
         ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)';
         ctx.lineWidth = 1;
         for (let x = 0; x < TABLE_WIDTH; x += 25) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, TABLE_HEIGHT);
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, TABLE_HEIGHT); ctx.stroke();
         }
         for (let y = 0; y < TABLE_HEIGHT; y += 25) {
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(TABLE_WIDTH, y);
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TABLE_WIDTH, y); ctx.stroke();
         }
 
-        // Border
         ctx.strokeStyle = '#00ffff';
         ctx.lineWidth = 3;
         ctx.strokeRect(5, 5, TABLE_WIDTH - 10, TABLE_HEIGHT - 10);
 
-        // Draw all objects
-        for (let i = objects.length - 1; i >= 0; i--) {
+        // Draw all objects EXCEPT ball (ball drawn last on top)
+        const ball = objects[0];
+        for (let i = objects.length - 1; i >= 1; i--) {
             const obj = objects[i];
-
             let color = obj.color;
 
-            if (obj.bounce > 0) {
-                color = '#ffffff';
-            }
+            if (obj.bounce > 0) { color = '#ffffff'; }
 
             if (i >= 1 && i <= FLIPPER_SEGMENTS) {
                 color = keys.z ? '#ff00ff' : '#ff0080';
-            }
-            else if (i > FLIPPER_SEGMENTS && i <= FLIPPER_SEGMENTS * 2) {
+            } else if (i > FLIPPER_SEGMENTS && i <= FLIPPER_SEGMENTS * 2) {
                 color = keys.x ? '#00ffff' : '#0080ff';
             }
 
-            if (obj.isShooter) {
-                color = '#00aa00';
-            }
+            if (obj.isShooter) { color = '#00aa00'; }
 
             if (obj.isDropTarget) {
-                if (!obj.active) {
-                    color = '#333300';
-                } else if (obj.bounce > 0) {
-                    color = '#ffffff';
-                } else {
-                    color = DROP_COLORS[targetLevel % DROP_COLORS.length];
-                }
+                if (!obj.active) { color = '#333300'; }
+                else if (obj.bounce > 0) { color = '#ffffff'; }
+                else { color = DROP_COLORS[targetLevel % DROP_COLORS.length]; }
             }
 
-            // Center bumper cycles color based on spot target completions
             if (obj.isCenterBumper && obj.bounce <= 0) {
                 color = BUMPER_COLORS[spotCompletions % BUMPER_COLORS.length];
             } else if (obj.isHighValue && obj.bounce <= 0) {
                 color = '#ff0000';
             }
 
-            if (obj.isBall) {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-                ctx.beginPath();
-                ctx.arc(obj.x - obj.vx * 3, obj.y - obj.vy * 3, obj.radius * 0.8, 0, Math.PI * 2);
-                ctx.fill();
-
-                color = '#ffffff';
-            }
-
             drawCircle(obj.x, obj.y, obj.radius + (obj.bounce || 0), color);
         }
 
-        // Draw top lane lights (between pins, above pin row)
+        // Draw lights, saucer, etc.
         const topLaneLightY = TOP_LANE_Y - 12;
         for (let i = 0; i < 3; i++) {
             const lx = (TOP_LANE_PINS[i] + TOP_LANE_PINS[i + 1]) / 2;
-            const litColor = topLaneLights[i] ? '#ffff00' : '#333333';
-            drawCircle(lx, topLaneLightY, 5, litColor);
+            drawCircle(lx, topLaneLightY, 5, topLaneLights[i] ? '#ffff00' : '#333333');
         }
 
-        // Draw spot targets (right side, against shooter lane)
         for (let i = 0; i < 4; i++) {
             const st = SPOT_TARGET_POSITIONS[i];
-            const stColor = spotTargets[i]
-                ? SPOT_LIT[targetLevel % SPOT_LIT.length]
-                : SPOT_DARK[targetLevel % SPOT_DARK.length];
+            const stColor = spotTargets[i] ? SPOT_LIT[targetLevel % SPOT_LIT.length] : SPOT_DARK[targetLevel % SPOT_DARK.length];
             drawCircle(st.x, st.y, 6, stColor);
         }
 
-        // Draw lane rollover lights (outlanes and inlanes)
         for (let i = 0; i < 4; i++) {
             const ll = LANE_LIGHT_POSITIONS[i];
-            const llColor = laneLights[i] ? '#00ff00' : '#333333';
-            drawCircle(ll.x, ll.y, 5, llColor);
+            drawCircle(ll.x, ll.y, 5, laneLights[i] ? '#00ff00' : '#333333');
         }
 
-        // Draw saucer (grey circle outline)
-        ctx.strokeStyle = saucerActive
-            ? (frame % 10 < 5 ? '#ffffff' : '#aaaaaa')
-            : '#555555';
+        ctx.strokeStyle = saucerActive ? (frame % 10 < 5 ? '#ffffff' : '#aaaaaa') : '#555555';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(SAUCER_X, SAUCER_Y, SAUCER_RADIUS, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Show next saucer threshold
         if (!saucerActive) {
             const nextThreshold = saucerLevel < SAUCER_THRESHOLDS.length
                 ? SAUCER_THRESHOLDS[saucerLevel]
@@ -870,7 +1083,6 @@
             ctx.fillText(nextThreshold, SAUCER_X, SAUCER_Y + 3);
         }
 
-        // Draw score multiplier indicator if active
         if (scoreMultiplier > 1) {
             ctx.fillStyle = '#ff8800';
             ctx.font = '14px Arial';
@@ -878,9 +1090,33 @@
             ctx.fillText(scoreMultiplier + 'X', CENTER_X, FLIPPER_Y - 140);
         }
 
+        // Draw ball LAST (on top of everything)
+        if (ball.x > -50) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.beginPath();
+            ctx.arc(ball.x - ball.vx * 3, ball.y - ball.vy * 3, ball.radius * 0.8, 0, Math.PI * 2);
+            ctx.fill();
+            drawCircle(ball.x, ball.y, ball.radius, '#ffffff');
+        }
+
+        // Draw particles
+        for (const p of particles) {
+            ctx.globalAlpha = Math.max(0, p.life / 80);
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+
+        // Draw state overlay
+        if (gameState !== STATE_PLAYING) {
+            drawOverlay();
+        }
+
         ctx.restore();
 
-        if (gameStarted) {
+        if (gameStarted && gameState === STATE_PLAYING) {
             document.getElementById('instructions').classList.add('hidden');
         }
     }
@@ -893,13 +1129,20 @@
     function gameLoop(timestamp) {
         const deltaTime = timestamp - lastTime;
         lastTime = timestamp;
-
         accumulator += Math.min(deltaTime, 50);
 
-        while (accumulator >= fixedDelta) {
-            updatePhysics();
-            accumulator -= fixedDelta;
-            frame++;
+        if (gameState === STATE_PLAYING) {
+            while (accumulator >= fixedDelta) {
+                updatePhysics();
+                accumulator -= fixedDelta;
+                frame++;
+            }
+        } else {
+            while (accumulator >= fixedDelta) {
+                accumulator -= fixedDelta;
+                frame++;
+            }
+            updateMenuState();
         }
 
         draw();
@@ -921,18 +1164,19 @@
 
     // === INPUT HANDLING ===
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'z' || e.key === 'Z') keys.z = true;
-        if (e.key === 'x' || e.key === 'X') keys.x = true;
-        if (e.key === 'c' || e.key === 'C') keys.c = true;
+        if (e.code === 'ShiftLeft' || e.key === 'z' || e.key === 'Z') keys.z = true;
+        if (e.code === 'ShiftRight' || e.key === 'x' || e.key === 'X') keys.x = true;
+        if (e.code === 'Space' || e.key === 'c' || e.key === 'C') keys.c = true;
+        if (e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') e.preventDefault();
     });
 
     document.addEventListener('keyup', (e) => {
-        if (e.key === 'z' || e.key === 'Z') keys.z = false;
-        if (e.key === 'x' || e.key === 'X') keys.x = false;
-        if (e.key === 'c' || e.key === 'C') keys.c = false;
+        if (e.code === 'ShiftLeft' || e.key === 'z' || e.key === 'Z') keys.z = false;
+        if (e.code === 'ShiftRight' || e.key === 'x' || e.key === 'X') keys.x = false;
+        if (e.code === 'Space' || e.key === 'c' || e.key === 'C') keys.c = false;
     });
 
-    // === TOUCH CONTROLS (invisible zones) ===
+    // === TOUCH CONTROLS ===
     document.body.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
     document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
@@ -947,8 +1191,7 @@
             if (x < width * 0.5) {
                 activeTouches.set(touch.identifier, { zone: 'left', startY: y });
                 keys.z = true;
-            }
-            else {
+            } else {
                 activeTouches.set(touch.identifier, { zone: 'right', startY: y });
                 keys.x = true;
             }
@@ -997,32 +1240,21 @@
     canvas.addEventListener('mousedown', (e) => {
         const x = e.clientX;
         const width = window.innerWidth;
-
         if (e.button === 0) {
-            if (x < width * 0.5) {
-                keys.z = true;
-            } else {
-                keys.x = true;
-            }
+            if (x < width * 0.5) { keys.z = true; } else { keys.x = true; }
         }
-        if (e.button === 2) {
-            keys.c = true;
-        }
+        if (e.button === 2) { keys.c = true; }
     });
 
     canvas.addEventListener('mouseup', (e) => {
-        if (e.button === 0) {
-            keys.z = false;
-            keys.x = false;
-        }
-        if (e.button === 2) {
-            keys.c = false;
-        }
+        if (e.button === 0) { keys.z = false; keys.x = false; }
+        if (e.button === 2) { keys.c = false; }
     });
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // === INITIALIZATION ===
+    loadHighScores();
     window.addEventListener('resize', resize);
     resize();
     buildTable();
