@@ -230,6 +230,8 @@
     let bothPressedPrev = false;
     let highScores = [];
     let particles = [];
+    let overlayTap = null;
+    let prevPlungeKey = false;
 
     // === HIGH SCORE FUNCTIONS ===
     function loadHighScores() {
@@ -743,6 +745,7 @@
         const rightJust = keys.x && !prevMenuKeys.x;
         const bothDown = keys.z && keys.x;
         const bothJust = bothDown && !bothPressedPrev;
+        const plungeJust = keys.c && !prevPlungeKey;
 
         if (gameState === STATE_GAME_OVER) {
             gameOverTimer--;
@@ -765,7 +768,7 @@
                     40 + Math.random() * (TABLE_HEIGHT / 3)
                 );
             }
-            if (bothJust) {
+            if (bothJust || overlayTap === 'confirm') {
                 currentInitialPos++;
                 if (currentInitialPos >= 3) {
                     const initials = ALPHABET[initialsChars[0]] + ALPHABET[initialsChars[1]] + ALPHABET[initialsChars[2]];
@@ -773,6 +776,14 @@
                     gameState = STATE_MENU;
                     createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 40);
                 }
+            } else if (plungeJust || overlayTap === 'back') {
+                if (currentInitialPos > 0) {
+                    currentInitialPos--;
+                } else {
+                    gameState = STATE_MENU;
+                }
+            } else if (overlayTap === 'skip') {
+                gameState = STATE_MENU;
             } else if (leftJust && !keys.x) {
                 initialsChars[currentInitialPos] = (initialsChars[currentInitialPos] + 25) % 26;
             } else if (rightJust && !keys.z) {
@@ -781,21 +792,23 @@
         }
 
         else if (gameState === STATE_MENU) {
-            if (leftJust && !keys.x) {
+            if ((leftJust && !keys.x) || overlayTap === 'scores') {
                 gameState = STATE_LEADERBOARD;
-            } else if (rightJust && !keys.z) {
+            } else if ((rightJust && !keys.z) || overlayTap === 'play') {
                 resetGame();
             }
         }
 
         else if (gameState === STATE_LEADERBOARD) {
-            if (leftJust || rightJust) {
+            if (leftJust || rightJust || plungeJust || overlayTap === 'back_to_menu') {
                 gameState = STATE_MENU;
             }
         }
 
         bothPressedPrev = bothDown;
         prevMenuKeys = { z: keys.z, x: keys.x };
+        prevPlungeKey = keys.c;
+        overlayTap = null;
     }
 
     // === DRAW OVERLAY ===
@@ -879,11 +892,45 @@
                 }
             }
 
-            ctx.fillStyle = '#666666';
-            ctx.font = '11px Arial';
+            // Draw buttons: BACK, SKIP, CONFIRM
+            const btnY2 = boxY + boxH + 35;
+            const btnH2 = 40;
+            const btnW2 = 95;
+            const btnGap2 = 10;
+            const totalBtnW = btnW2 * 3 + btnGap2 * 2;
+            const btnStartX2 = (TABLE_WIDTH - totalBtnW) / 2;
+
+            // BACK button
+            ctx.strokeStyle = '#ff8800';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(btnStartX2, btnY2, btnW2, btnH2);
+            ctx.fillStyle = '#ff8800';
+            ctx.font = 'bold 16px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('LEFT / RIGHT: SCROLL', TABLE_WIDTH / 2, boxY + boxH + 42);
-            ctx.fillText('BOTH: CONFIRM LETTER', TABLE_WIDTH / 2, boxY + boxH + 57);
+            ctx.fillText('BACK', btnStartX2 + btnW2 / 2, btnY2 + 26);
+
+            // SKIP button
+            const skipBtnX = btnStartX2 + btnW2 + btnGap2;
+            ctx.strokeStyle = '#888888';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(skipBtnX, btnY2, btnW2, btnH2);
+            ctx.fillStyle = '#888888';
+            ctx.font = 'bold 16px Arial';
+            ctx.fillText('SKIP', skipBtnX + btnW2 / 2, btnY2 + 26);
+
+            // CONFIRM button
+            const confirmBtnX = btnStartX2 + (btnW2 + btnGap2) * 2;
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(confirmBtnX, btnY2, btnW2, btnH2);
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 16px Arial';
+            ctx.fillText('OK', confirmBtnX + btnW2 / 2, btnY2 + 26);
+
+            ctx.fillStyle = '#666666';
+            ctx.font = '10px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('L/R: SCROLL   BOTH/OK: CONFIRM   PLUNGE: BACK', TABLE_WIDTH / 2, btnY2 + btnH2 + 18);
         }
 
         else if (gameState === STATE_MENU) {
@@ -976,10 +1023,18 @@
                 }
             }
 
-            ctx.fillStyle = '#666666';
-            ctx.font = '12px Arial';
+            // BACK button
+            const lbBackX = TABLE_WIDTH / 2 - 60;
+            const lbBackY = TABLE_HEIGHT - 75;
+            const lbBackW = 120;
+            const lbBackH = 40;
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(lbBackX, lbBackY, lbBackW, lbBackH);
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 16px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('PRESS ANY BUTTON TO RETURN', TABLE_WIDTH / 2, TABLE_HEIGHT - 40);
+            ctx.fillText('BACK', TABLE_WIDTH / 2, lbBackY + 26);
         }
     }
 
@@ -1187,6 +1242,61 @@
             const x = touch.clientX;
             const y = touch.clientY;
             const width = window.innerWidth;
+
+            // Check overlay buttons in non-playing states
+            if (gameState !== STATE_PLAYING) {
+                const gameX = (x - offsetX) / scale;
+                const gameY = (y - offsetY) / scale;
+
+                if (gameState === STATE_ENTER_INITIALS) {
+                    const bBoxH = 52;
+                    const bBoxY = TABLE_HEIGHT / 2 - 25;
+                    const bY = bBoxY + bBoxH + 35;
+                    const bH = 40;
+                    const bW = 95;
+                    const bGap = 10;
+                    const bTotal = bW * 3 + bGap * 2;
+                    const bStart = (TABLE_WIDTH - bTotal) / 2;
+
+                    if (gameY >= bY && gameY <= bY + bH) {
+                        if (gameX >= bStart && gameX <= bStart + bW) {
+                            overlayTap = 'back'; continue;
+                        }
+                        if (gameX >= bStart + bW + bGap && gameX <= bStart + bW * 2 + bGap) {
+                            overlayTap = 'skip'; continue;
+                        }
+                        if (gameX >= bStart + (bW + bGap) * 2 && gameX <= bStart + (bW + bGap) * 2 + bW) {
+                            overlayTap = 'confirm'; continue;
+                        }
+                    }
+                }
+
+                if (gameState === STATE_MENU) {
+                    const mbY = TABLE_HEIGHT / 2 + 10;
+                    const mbW = 130;
+                    const mbH = 50;
+                    const mGap = 16;
+                    const leftBX = TABLE_WIDTH / 2 - mbW - mGap / 2;
+                    const rightBX = TABLE_WIDTH / 2 + mGap / 2;
+
+                    if (gameY >= mbY && gameY <= mbY + mbH) {
+                        if (gameX >= leftBX && gameX <= leftBX + mbW) {
+                            overlayTap = 'scores'; continue;
+                        }
+                        if (gameX >= rightBX && gameX <= rightBX + mbW) {
+                            overlayTap = 'play'; continue;
+                        }
+                    }
+                }
+
+                if (gameState === STATE_LEADERBOARD) {
+                    const lbBX = TABLE_WIDTH / 2 - 60;
+                    const lbBY = TABLE_HEIGHT - 75;
+                    if (gameX >= lbBX && gameX <= lbBX + 120 && gameY >= lbBY && gameY <= lbBY + 40) {
+                        overlayTap = 'back_to_menu'; continue;
+                    }
+                }
+            }
 
             if (x < width * 0.5) {
                 activeTouches.set(touch.identifier, { zone: 'left', startY: y });
