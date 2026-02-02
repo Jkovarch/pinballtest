@@ -232,6 +232,11 @@
     let particles = [];
     let overlayTap = null;
     let prevPlungeKey = false;
+    let levelUpTimer = 0;
+    let saucerLevelUpDone = false;
+    let ballSaveAvailable = true;
+    let ballStartScore = 0;
+    let ballSaveTimer = 0;
 
     // === HIGH SCORE FUNCTIONS ===
     function loadHighScores() {
@@ -258,6 +263,23 @@
         highScores.sort((a, b) => b.score - a.score);
         if (highScores.length > MAX_HIGH_SCORES) highScores = highScores.slice(0, MAX_HIGH_SCORES);
         saveHighScores();
+    }
+
+    function loadSavedInitials() {
+        try {
+            const saved = localStorage.getItem('neonPinballInitials');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed) && parsed.length === 3) return parsed;
+            }
+        } catch (e) {}
+        return [0, 0, 0];
+    }
+
+    function saveSavedInitials(chars) {
+        try {
+            localStorage.setItem('neonPinballInitials', JSON.stringify(chars));
+        } catch (e) {}
     }
 
     // === PARTICLES ===
@@ -304,6 +326,11 @@
         targetLevel = 0;
         topLaneLights = [false, false, false];
         particles = [];
+        ballSaveAvailable = true;
+        ballStartScore = 0;
+        ballSaveTimer = 0;
+        levelUpTimer = 0;
+        saucerLevelUpDone = false;
 
         const ball = objects[0];
         ball.x = SHOOTER_X;
@@ -595,7 +622,24 @@
 
             // Check if ball is lost
             if (ball.y > TABLE_HEIGHT + 50) {
-                if (ballCount > 0) {
+                if (ballSaveAvailable && (score - ballStartScore) < 20) {
+                    // Ball save!
+                    ballSaveAvailable = false;
+                    ballSaveTimer = 120;
+                    ball.x = SHOOTER_X;
+                    ball.y = SHOOTER_Y - 20;
+                    ball.vx = 0;
+                    ball.vy = 0;
+                    const bsStart = 1 + FLIPPER_SEGMENTS * 2;
+                    for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
+                        const seg = objects[bsStart + si];
+                        if (seg && seg.isShooter) {
+                            seg.y = SHOOTER_Y + si;
+                            seg.vy = 0;
+                        }
+                    }
+                    createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 30);
+                } else if (ballCount > 0) {
                     ballCount--;
                     document.getElementById('balls').textContent = ballCount;
 
@@ -612,6 +656,9 @@
                                 seg.vy = 0;
                             }
                         }
+                        // Reset ball save for new ball
+                        ballSaveAvailable = true;
+                        ballStartScore = score;
                     } else {
                         // Game over - transition to in-game overlay
                         finalScore = score;
@@ -695,6 +742,7 @@
                     if (speed < SAUCER_CAPTURE_SPEED) {
                         saucerActive = true;
                         saucerTimer = SAUCER_HOLD_TIME;
+                        saucerLevelUpDone = false;
                         ball.x = SAUCER_X;
                         ball.y = SAUCER_Y;
                         ball.vx = 0;
@@ -711,23 +759,59 @@
         if (saucerActive) {
             saucerTimer--;
             if (saucerTimer <= 0) {
-                saucerActive = false;
-                const threshold = saucerLevel < SAUCER_THRESHOLDS.length
-                    ? SAUCER_THRESHOLDS[saucerLevel]
-                    : SAUCER_THRESHOLDS[SAUCER_THRESHOLDS.length - 1] * 2;
-                if (score >= threshold) {
-                    targetLevel++;
-                    saucerLevel++;
-                    score += 50 * scoreMultiplier;
+                if (saucerLevelUpDone) {
+                    // Level up animation finished, kick ball out
+                    saucerActive = false;
+                    saucerLevelUpDone = false;
+                    const ball = objects[0];
+                    ball.vy = -0.4;
+                    ball.vx = (Math.random() - 0.5) * 0.15;
                 } else {
-                    score += 15 * scoreMultiplier;
+                    const threshold = saucerLevel < SAUCER_THRESHOLDS.length
+                        ? SAUCER_THRESHOLDS[saucerLevel]
+                        : SAUCER_THRESHOLDS[SAUCER_THRESHOLDS.length - 1] * 2;
+                    if (score >= threshold) {
+                        targetLevel++;
+                        saucerLevel++;
+                        score += 50 * scoreMultiplier;
+                        document.getElementById('score').textContent = score;
+                        // Trigger level up animation, hold ball
+                        saucerLevelUpDone = true;
+                        levelUpTimer = 90;
+                        saucerTimer = 90;
+                        createParticles(SAUCER_X, SAUCER_Y - 20, 40);
+                        createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 4);
+                    } else {
+                        score += 15 * scoreMultiplier;
+                        document.getElementById('score').textContent = score;
+                        saucerActive = false;
+                        const ball = objects[0];
+                        ball.vy = -0.4;
+                        ball.vx = (Math.random() - 0.5) * 0.15;
+                    }
                 }
-                document.getElementById('score').textContent = score;
-                const ball = objects[0];
-                ball.vy = -0.4;
-                ball.vx = (Math.random() - 0.5) * 0.15;
             }
         }
+
+        // Update display timers and particles during gameplay
+        if (levelUpTimer > 0) {
+            levelUpTimer--;
+            if (levelUpTimer > 0 && levelUpTimer % 15 === 0) {
+                createFirework(
+                    60 + Math.random() * (TABLE_WIDTH - 120),
+                    80 + Math.random() * (TABLE_HEIGHT / 4)
+                );
+            }
+        }
+        if (ballSaveTimer > 0) ballSaveTimer--;
+
+        particles = particles.filter(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.03;
+            p.life--;
+            return p.life > 0;
+        });
     }
 
     // === MENU STATE UPDATE ===
@@ -752,7 +836,7 @@
             if (gameOverTimer <= 0) {
                 if (isNewHighScore) {
                     gameState = STATE_ENTER_INITIALS;
-                    initialsChars = [0, 0, 0];
+                    initialsChars = loadSavedInitials();
                     currentInitialPos = 0;
                     createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
                 } else {
@@ -772,6 +856,7 @@
                 currentInitialPos++;
                 if (currentInitialPos >= 3) {
                     const initials = ALPHABET[initialsChars[0]] + ALPHABET[initialsChars[1]] + ALPHABET[initialsChars[2]];
+                    saveSavedInitials([initialsChars[0], initialsChars[1], initialsChars[2]]);
                     addHighScore(initials, finalScore);
                     gameState = STATE_MENU;
                     createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 40);
@@ -1152,6 +1237,37 @@
             ctx.arc(ball.x - ball.vx * 3, ball.y - ball.vy * 3, ball.radius * 0.8, 0, Math.PI * 2);
             ctx.fill();
             drawCircle(ball.x, ball.y, ball.radius, '#ffffff');
+        }
+
+        // Draw level up text
+        if (levelUpTimer > 0) {
+            const luAlpha = Math.min(1, levelUpTimer / 20);
+            ctx.save();
+            ctx.globalAlpha = luAlpha;
+            ctx.shadowColor = '#ffff00';
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = '#ffff00';
+            ctx.font = 'bold 26px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('TABLE LEVEL UP!', TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 16px Arial';
+            ctx.fillText('LEVEL ' + targetLevel, TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 28);
+            ctx.restore();
+        }
+
+        // Draw ball save text
+        if (ballSaveTimer > 0) {
+            const bsAlpha = Math.min(1, ballSaveTimer / 20);
+            ctx.save();
+            ctx.globalAlpha = bsAlpha;
+            ctx.shadowColor = '#00ff00';
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 28px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('BALL SAVE!', TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
+            ctx.restore();
         }
 
         // Draw particles
