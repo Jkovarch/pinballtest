@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Neon Pinball</title>
+    <title>PinbALL or Nothing</title>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
     <style>
         * {
             margin: 0;
@@ -109,18 +112,122 @@
 
     <!-- Instructions -->
     <div id="instructions">
-        <h1>NEON PINBALL</h1>
-        <p>Keyboard: <span class="key">L-SHIFT</span> Left <span class="key">R-SHIFT</span> Right <span class="key">SPACE</span> Launch</p>
+        <h1>PinbALL or Nothing</h1>
+        <p>Keyboard: <span class="key">L-SHIFT</span> Left <span class="key">R-SHIFT</span> Right <span class="key">SPACE</span> Launch <span class="key">V</span> Confirm</p>
         <p>Touch: Left/Right sides for flippers</p>
         <p>Swipe down to pull and release launcher</p>
     </div>
 
     <script>
     // ============================================
-    // NEON PINBALL - Based on Lu1ky Pinball physics
+    // PinbALL or Nothing - Based on Lu1ky Pinball
     // ============================================
 
     'use strict';
+
+    // === FIREBASE SETUP ===
+    // REPLACE with your web app config from Firebase Console > Project Settings > Your apps > Web app
+    const firebaseConfig = {
+        apiKey: "AIzaSyA04wso_wktEiTj8eH4nUwoLM7tYFvn_9Y",
+        authDomain: "pinballornothing.firebaseapp.com",
+        databaseURL: "https://pinballornothing-default-rtdb.firebaseio.com",
+        projectId: "pinballornothing",
+        storageBucket: "pinballornothing.firebasestorage.app",
+        messagingSenderId: "649858808879",
+        appId: "1:649858808879:web:0df7f8ea752d77f8551ada",
+        measurementId: "G-6JRG1PK20E"
+    };
+
+    let firebaseReady = false;
+    let db = null;
+    try {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.database();
+        firebaseReady = true;
+    } catch (e) {
+        console.warn('Firebase init failed:', e);
+    }
+
+    function submitScoreToFirebase(initials, scoreVal, tableLevel) {
+        if (!firebaseReady || !db) return;
+        try {
+            db.ref('scores').push().set({
+                initials: initials,
+                score: scoreVal,
+                date: new Date().toISOString(),
+                maxTableLevel: tableLevel || 0
+            });
+        } catch (e) { console.warn('Firebase submit failed:', e); }
+    }
+
+    function loadOnlineScores(callback) {
+        if (!firebaseReady || !db) { callback([]); return; }
+        try {
+            db.ref('scores')
+              .orderByChild('score')
+              .limitToLast(10)
+              .once('value', (snapshot) => {
+                  const scores = [];
+                  snapshot.forEach(child => { scores.push(child.val()); });
+                  scores.sort((a, b) => b.score - a.score);
+                  callback(scores);
+              }, () => callback([]));
+        } catch (e) { callback([]); }
+    }
+
+    // === SOUND SYSTEM ===
+    const SndCtx = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+    const soundBuffers = {};
+    let audioInitialized = false;
+    let lastWallSoundTime = 0;
+
+    function initAudio() {
+        if (audioCtx) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            return;
+        }
+        try {
+            audioCtx = new SndCtx();
+            audioInitialized = true;
+            loadAllSounds();
+        } catch (e) { console.warn('Audio init failed:', e); }
+    }
+
+    async function loadSound(name, url) {
+        try {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            soundBuffers[name] = await audioCtx.decodeAudioData(arrayBuffer);
+        } catch (e) {}
+    }
+
+    async function loadAllSounds() {
+        const sounds = [
+            'Flipper1', 'Flipper2', 'Flipper3',
+            'PopBumper1', 'PopBumper2', 'PopBumper3', 'PopBumper4', 'PopBumper5',
+            'SlingShot1', 'SlingShot2', 'SlingShot3',
+            'Wall1', 'Wall2', 'Wall3',
+            'Plunge', 'BallDrain', 'BallSave', 'TableLevelUp'
+        ];
+        for (const s of sounds) {
+            await loadSound(s, 'PinballSounds/' + s + '.mp3');
+        }
+    }
+
+    function playSound(name) {
+        if (!audioCtx || !soundBuffers[name]) return;
+        try {
+            const source = audioCtx.createBufferSource();
+            source.buffer = soundBuffers[name];
+            source.connect(audioCtx.destination);
+            source.start(0);
+        } catch (e) {}
+    }
+
+    function playRandomSound(prefix, count) {
+        playSound(prefix + (Math.floor(Math.random() * count) + 1));
+    }
 
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
@@ -175,9 +282,9 @@
     ];
 
     // Game states
-    const STATE_PLAYING = 0;
-    const STATE_GAME_OVER = 1;
-    const STATE_ENTER_INITIALS = 2;
+    const STATE_WELCOME = 0;
+    const STATE_PLAYING = 1;
+    const STATE_GAME_OVER = 2;
     const STATE_MENU = 3;
     const STATE_LEADERBOARD = 4;
 
@@ -196,7 +303,7 @@
 
     let flipperLeft = 1;
     let flipperRight = 1;
-    let keys = { z: false, x: false, c: false };
+    let keys = { z: false, x: false, c: false, v: false };
 
     let swipeStartY = 0;
     let isSwiping = false;
@@ -218,25 +325,32 @@
     let saucerTimer = 0;
     let saucerLevel = 0;
     let targetLevel = 0;
+    let maxTableLevel = 0;
 
     // UI state
-    let gameState = STATE_PLAYING;
+    let gameState = STATE_WELCOME;
     let gameOverTimer = 0;
     let finalScore = 0;
     let isNewHighScore = false;
     let initialsChars = [0, 0, 0];
     let currentInitialPos = 0;
     let prevMenuKeys = { z: false, x: false };
-    let bothPressedPrev = false;
+    let prevVKey = false;
+    let prevPlungeKey = false;
     let highScores = [];
+    let onlineScores = [];
+    let showOnlineScores = false;
     let particles = [];
     let overlayTap = null;
-    let prevPlungeKey = false;
     let levelUpTimer = 0;
     let saucerLevelUpDone = false;
     let ballSaveAvailable = true;
     let ballStartScore = 0;
     let ballSaveTimer = 0;
+    let extraBallTimer = 0;
+
+    // Session state
+    let sessionInitials = null;
 
     // === HIGH SCORE FUNCTIONS ===
     function loadHighScores() {
@@ -258,8 +372,8 @@
         return s > highScores[highScores.length - 1].score;
     }
 
-    function addHighScore(initials, s) {
-        highScores.push({ initials: initials, score: s, date: new Date().toISOString() });
+    function addHighScore(initials, s, tableLevel) {
+        highScores.push({ initials: initials, score: s, date: new Date().toISOString(), maxTableLevel: tableLevel || 0 });
         highScores.sort((a, b) => b.score - a.score);
         if (highScores.length > MAX_HIGH_SCORES) highScores = highScores.slice(0, MAX_HIGH_SCORES);
         saveHighScores();
@@ -324,12 +438,14 @@
         saucerTimer = 0;
         saucerLevel = 0;
         targetLevel = 0;
+        maxTableLevel = 0;
         topLaneLights = [false, false, false];
         particles = [];
         ballSaveAvailable = true;
         ballStartScore = 0;
         ballSaveTimer = 0;
         levelUpTimer = 0;
+        extraBallTimer = 0;
         saucerLevelUpDone = false;
 
         const ball = objects[0];
@@ -358,6 +474,7 @@
         keys.z = false;
         keys.x = false;
         keys.c = false;
+        keys.v = false;
     }
 
     // === OBJECT CREATION ===
@@ -430,11 +547,12 @@
 
             for (let i = 0; i <= 12; i++) {
                 const t = i / 12;
-                createObject(
+                const sObj = createObject(
                     slingOuterX + (slingInnerX - slingOuterX) * t,
                     slingTopY + (slingBottomInnerY - slingTopY) * t,
                     TYPE_BUMPER, 4
                 );
+                sObj.isSlingshot = true;
             }
 
             for (let i = 0; i <= 5; i++) {
@@ -497,12 +615,80 @@
         }
     }
 
+    // === OVERLAY BUTTON HIT TEST ===
+    function checkOverlayButtonHit(gameX, gameY) {
+        if (gameState === STATE_WELCOME) {
+            // START button
+            const startBtnX = TABLE_WIDTH / 2 - 75;
+            const startBtnY = TABLE_HEIGHT / 2 + 90;
+            if (gameX >= startBtnX && gameX <= startBtnX + 150 && gameY >= startBtnY && gameY <= startBtnY + 50) {
+                return 'start';
+            }
+            // Letter boxes area - check for left/right scroll
+            const boxW = 44;
+            const boxGap = 12;
+            const totalW = boxW * 3 + boxGap * 2;
+            const startLetterX = (TABLE_WIDTH - totalW) / 2;
+            const boxY = TABLE_HEIGHT / 2 - 10;
+            const boxH = 52;
+            // Up arrows
+            if (gameY >= boxY - 25 && gameY <= boxY) {
+                const activeBoxX = startLetterX + currentInitialPos * (boxW + boxGap);
+                if (gameX >= activeBoxX && gameX <= activeBoxX + boxW) return 'scroll_up';
+            }
+            // Down arrows
+            if (gameY >= boxY + boxH && gameY <= boxY + boxH + 25) {
+                const activeBoxX = startLetterX + currentInitialPos * (boxW + boxGap);
+                if (gameX >= activeBoxX && gameX <= activeBoxX + boxW) return 'scroll_down';
+            }
+            // Confirm button (between boxes and start)
+            const cfmBtnX = TABLE_WIDTH / 2 - 55;
+            const cfmBtnY = boxY + boxH + 30;
+            if (gameX >= cfmBtnX && gameX <= cfmBtnX + 110 && gameY >= cfmBtnY && gameY <= cfmBtnY + 36) {
+                return 'confirm';
+            }
+        }
+
+        if (gameState === STATE_MENU) {
+            const mbY = TABLE_HEIGHT / 2 + 10;
+            const mbW = 130;
+            const mbH = 50;
+            const mGap = 16;
+            const leftBX = TABLE_WIDTH / 2 - mbW - mGap / 2;
+            const rightBX = TABLE_WIDTH / 2 + mGap / 2;
+            if (gameY >= mbY && gameY <= mbY + mbH) {
+                if (gameX >= leftBX && gameX <= leftBX + mbW) return 'scores';
+                if (gameX >= rightBX && gameX <= rightBX + mbW) return 'play';
+            }
+        }
+
+        if (gameState === STATE_LEADERBOARD) {
+            // BACK button
+            const lbBX = TABLE_WIDTH / 2 - 60;
+            const lbBY = TABLE_HEIGHT - 75;
+            if (gameX >= lbBX && gameX <= lbBX + 120 && gameY >= lbBY && gameY <= lbBY + 40) {
+                return 'back_to_menu';
+            }
+            // LOCAL/ONLINE toggle
+            const togX = TABLE_WIDTH / 2 - 80;
+            const togY = 88;
+            if (gameX >= togX && gameX <= togX + 160 && gameY >= togY && gameY <= togY + 25) {
+                return 'toggle_scores';
+            }
+        }
+
+        return null;
+    }
+
     // === PHYSICS UPDATE ===
     function updatePhysics() {
         const ball = objects[0];
 
         const leftJustPressed = keys.z && !flipperLeftWasPressed;
         const rightJustPressed = keys.x && !flipperRightWasPressed;
+
+        if (leftJustPressed) playRandomSound('Flipper', 3);
+        if (rightJustPressed) playRandomSound('Flipper', 3);
 
         if (leftJustPressed && topLaneLights.some(l => l)) {
             topLaneLights = [topLaneLights[1], topLaneLights[2], topLaneLights[0]];
@@ -615,6 +801,9 @@
                             ballCount++;
                             document.getElementById('balls').textContent = ballCount;
                             laneLights = [false, false, false, false];
+                            extraBallTimer = 120;
+                            createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 40);
+                            createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
                         }
                     }
                 }
@@ -626,6 +815,7 @@
                     // Ball save!
                     ballSaveAvailable = false;
                     ballSaveTimer = 120;
+                    playSound('BallSave');
                     ball.x = SHOOTER_X;
                     ball.y = SHOOTER_Y - 20;
                     ball.vx = 0;
@@ -642,6 +832,7 @@
                 } else if (ballCount > 0) {
                     ballCount--;
                     document.getElementById('balls').textContent = ballCount;
+                    playSound('BallDrain');
 
                     if (ballCount > 0) {
                         ball.x = CENTER_X + DOME_RADIUS - BALL_RADIUS;
@@ -660,7 +851,7 @@
                         ballSaveAvailable = true;
                         ballStartScore = score;
                     } else {
-                        // Game over - transition to in-game overlay
+                        // Game over
                         finalScore = score;
                         isNewHighScore = checkHighScore(score);
                         gameState = STATE_GAME_OVER;
@@ -669,7 +860,10 @@
                         ball.y = -100;
                         ball.vx = 0;
                         ball.vy = 0;
-                        if (isNewHighScore) {
+                        // Auto-submit score with session initials
+                        if (isNewHighScore && sessionInitials) {
+                            addHighScore(sessionInitials, finalScore, maxTableLevel);
+                            submitScoreToFirebase(sessionInitials, finalScore, maxTableLevel);
                             createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 3, 60);
                         }
                     }
@@ -714,6 +908,12 @@
                             restitution = BUMPER_RESTITUTION;
                         } else if (obj.type === TYPE_BUMPER && !obj.bounce) {
                             obj.bounce = 10;
+                            // Sound: slingshot vs pop bumper
+                            if (obj.isSlingshot) {
+                                playRandomSound('SlingShot', 3);
+                            } else {
+                                playRandomSound('PopBumper', 5);
+                            }
                             if (obj.y < FLIPPER_Y - 80) {
                                 if (obj.isHighValue) { score += 5 * scoreMultiplier; }
                                 else { score += scoreMultiplier; }
@@ -722,6 +922,14 @@
                             restitution = BUMPER_RESTITUTION;
                         } else {
                             restitution = RESTITUTION;
+                            // Wall sound with cooldown
+                            if (!obj.isShooter && i > FLIPPER_SEGMENTS * 2 && audioCtx) {
+                                const now = audioCtx.currentTime;
+                                if (now - lastWallSoundTime > 0.08) {
+                                    lastWallSoundTime = now;
+                                    playRandomSound('Wall', 3);
+                                }
+                            }
                         }
 
                         ball.vx += (relVx + dy / tangent) * restitution;
@@ -755,12 +963,16 @@
             }
         }
 
+        // Plunge sound detection
+        if (!keys.c && prevPlungeKey && gameState === STATE_PLAYING) {
+            playSound('Plunge');
+        }
+
         // Saucer timer (per frame)
         if (saucerActive) {
             saucerTimer--;
             if (saucerTimer <= 0) {
                 if (saucerLevelUpDone) {
-                    // Level up animation finished, kick ball out
                     saucerActive = false;
                     saucerLevelUpDone = false;
                     const ball = objects[0];
@@ -773,14 +985,15 @@
                     if (score >= threshold) {
                         targetLevel++;
                         saucerLevel++;
+                        maxTableLevel = Math.max(maxTableLevel, targetLevel);
                         score += 50 * scoreMultiplier;
                         document.getElementById('score').textContent = score;
-                        // Trigger level up animation, hold ball
                         saucerLevelUpDone = true;
                         levelUpTimer = 90;
                         saucerTimer = 90;
                         createParticles(SAUCER_X, SAUCER_Y - 20, 40);
                         createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 4);
+                        playSound('TableLevelUp');
                     } else {
                         score += 15 * scoreMultiplier;
                         document.getElementById('score').textContent = score;
@@ -804,6 +1017,15 @@
             }
         }
         if (ballSaveTimer > 0) ballSaveTimer--;
+        if (extraBallTimer > 0) {
+            extraBallTimer--;
+            if (extraBallTimer > 0 && extraBallTimer % 20 === 0) {
+                createFirework(
+                    60 + Math.random() * (TABLE_WIDTH - 120),
+                    80 + Math.random() * (TABLE_HEIGHT / 3)
+                );
+            }
+        }
 
         particles = particles.filter(p => {
             p.x += p.vx;
@@ -812,6 +1034,8 @@
             p.life--;
             return p.life > 0;
         });
+
+        prevPlungeKey = keys.c;
     }
 
     // === MENU STATE UPDATE ===
@@ -827,123 +1051,100 @@
 
         const leftJust = keys.z && !prevMenuKeys.z;
         const rightJust = keys.x && !prevMenuKeys.x;
-        const bothDown = keys.z && keys.x;
-        const bothJust = bothDown && !bothPressedPrev;
+        const vJust = keys.v && !prevVKey;
         const plungeJust = keys.c && !prevPlungeKey;
 
-        if (gameState === STATE_GAME_OVER) {
-            gameOverTimer--;
-            if (gameOverTimer <= 0) {
-                if (isNewHighScore) {
-                    gameState = STATE_ENTER_INITIALS;
-                    initialsChars = loadSavedInitials();
-                    currentInitialPos = 0;
-                    createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
-                } else {
-                    gameState = STATE_MENU;
-                }
-            }
-        }
-
-        else if (gameState === STATE_ENTER_INITIALS) {
-            if (frame % 40 === 0) {
-                createFirework(
-                    60 + Math.random() * (TABLE_WIDTH - 120),
-                    40 + Math.random() * (TABLE_HEIGHT / 3)
-                );
-            }
-            if (bothJust || overlayTap === 'confirm') {
-                currentInitialPos++;
-                if (currentInitialPos >= 3) {
-                    const initials = ALPHABET[initialsChars[0]] + ALPHABET[initialsChars[1]] + ALPHABET[initialsChars[2]];
+        if (gameState === STATE_WELCOME) {
+            if (vJust || overlayTap === 'confirm' || overlayTap === 'start') {
+                if (overlayTap === 'start') {
+                    // Quick start with current initials
+                    sessionInitials = ALPHABET[initialsChars[0]] + ALPHABET[initialsChars[1]] + ALPHABET[initialsChars[2]];
                     saveSavedInitials([initialsChars[0], initialsChars[1], initialsChars[2]]);
-                    addHighScore(initials, finalScore);
-                    gameState = STATE_MENU;
-                    createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 40);
+                    resetGame();
+                } else {
+                    currentInitialPos++;
+                    if (currentInitialPos >= 3) {
+                        sessionInitials = ALPHABET[initialsChars[0]] + ALPHABET[initialsChars[1]] + ALPHABET[initialsChars[2]];
+                        saveSavedInitials([initialsChars[0], initialsChars[1], initialsChars[2]]);
+                        resetGame();
+                    }
                 }
             } else if (plungeJust || overlayTap === 'back') {
-                if (currentInitialPos > 0) {
-                    currentInitialPos--;
-                } else {
-                    gameState = STATE_MENU;
-                }
-            } else if (overlayTap === 'skip') {
-                gameState = STATE_MENU;
+                if (currentInitialPos > 0) currentInitialPos--;
             } else if (leftJust && !keys.x) {
                 initialsChars[currentInitialPos] = (initialsChars[currentInitialPos] + 25) % 26;
             } else if (rightJust && !keys.z) {
                 initialsChars[currentInitialPos] = (initialsChars[currentInitialPos] + 1) % 26;
+            } else if (overlayTap === 'scroll_up') {
+                initialsChars[currentInitialPos] = (initialsChars[currentInitialPos] + 25) % 26;
+            } else if (overlayTap === 'scroll_down') {
+                initialsChars[currentInitialPos] = (initialsChars[currentInitialPos] + 1) % 26;
+            }
+        }
+
+        else if (gameState === STATE_GAME_OVER) {
+            gameOverTimer--;
+            if (gameOverTimer <= 0) {
+                gameState = STATE_MENU;
             }
         }
 
         else if (gameState === STATE_MENU) {
             if ((leftJust && !keys.x) || overlayTap === 'scores') {
                 gameState = STATE_LEADERBOARD;
-            } else if ((rightJust && !keys.z) || overlayTap === 'play') {
+                // Load online scores when entering leaderboard
+                loadOnlineScores(scores => { onlineScores = scores; });
+            } else if ((rightJust && !keys.z) || vJust || overlayTap === 'play') {
                 resetGame();
             }
         }
 
         else if (gameState === STATE_LEADERBOARD) {
-            if (leftJust || rightJust || plungeJust || overlayTap === 'back_to_menu') {
+            if (leftJust || rightJust || plungeJust || vJust || overlayTap === 'back_to_menu') {
                 gameState = STATE_MENU;
+            } else if (overlayTap === 'toggle_scores') {
+                showOnlineScores = !showOnlineScores;
+                if (showOnlineScores) {
+                    loadOnlineScores(scores => { onlineScores = scores; });
+                }
             }
         }
 
-        bothPressedPrev = bothDown;
         prevMenuKeys = { z: keys.z, x: keys.x };
+        prevVKey = keys.v;
         prevPlungeKey = keys.c;
         overlayTap = null;
     }
 
     // === DRAW OVERLAY ===
     function drawOverlay() {
-        if (gameState === STATE_GAME_OVER) {
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        if (gameState === STATE_WELCOME) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
             ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
 
+            // Title
+            ctx.textAlign = 'center';
+            ctx.font = 'bold 36px Arial';
             ctx.fillStyle = '#ff00ff';
-            ctx.font = 'bold 32px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('GAME OVER', TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
+            ctx.fillText('PinB', TABLE_WIDTH / 2 - 52, TABLE_HEIGHT / 5);
+            ctx.fillStyle = '#00ffff';
+            ctx.fillText('ALL', TABLE_WIDTH / 2 + 18, TABLE_HEIGHT / 5);
 
             ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 24px Arial';
-            ctx.fillText(finalScore.toString(), TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 40);
+            ctx.font = 'bold 22px Arial';
+            ctx.fillText('or Nothing', TABLE_WIDTH / 2, TABLE_HEIGHT / 5 + 32);
 
-            if (isNewHighScore && frame % 20 < 14) {
-                ctx.fillStyle = '#ffff00';
-                ctx.font = 'bold 18px Arial';
-                ctx.fillText('NEW HIGH SCORE!', TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 75);
-            }
-        }
-
-        else if (gameState === STATE_ENTER_INITIALS) {
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-            ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
-
-            if (frame % 30 < 22) {
-                ctx.fillStyle = frame % 60 < 30 ? '#ff00ff' : '#00ffff';
-                ctx.font = 'bold 26px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText('NEW HIGH SCORE!', TABLE_WIDTH / 2, TABLE_HEIGHT / 4 - 10);
-            }
-
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 28px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(finalScore.toString(), TABLE_WIDTH / 2, TABLE_HEIGHT / 4 + 30);
-
+            // Initials entry
             ctx.fillStyle = '#888888';
             ctx.font = '14px Arial';
-            ctx.fillText('ENTER YOUR INITIALS', TABLE_WIDTH / 2, TABLE_HEIGHT / 2 - 55);
+            ctx.fillText('ENTER YOUR INITIALS', TABLE_WIDTH / 2, TABLE_HEIGHT / 2 - 42);
 
             const boxW = 44;
             const boxH = 52;
             const boxGap = 12;
             const totalW = boxW * 3 + boxGap * 2;
             const startX = (TABLE_WIDTH - totalW) / 2;
-            const boxY = TABLE_HEIGHT / 2 - 25;
+            const boxY = TABLE_HEIGHT / 2 - 10;
 
             for (let i = 0; i < 3; i++) {
                 const bx = startX + i * (boxW + boxGap);
@@ -959,11 +1160,7 @@
                     ctx.fillRect(bx, boxY, boxW, boxH);
                 }
 
-                let letter;
-                if (isConfirmed) { letter = ALPHABET[initialsChars[i]]; }
-                else if (isActive) { letter = ALPHABET[initialsChars[i]]; }
-                else { letter = '_'; }
-
+                const letter = (isConfirmed || isActive) ? ALPHABET[initialsChars[i]] : '_';
                 ctx.fillStyle = isActive ? '#00ffff' : (isConfirmed ? '#ff00ff' : '#555555');
                 ctx.font = 'bold 30px Arial';
                 ctx.textAlign = 'center';
@@ -977,45 +1174,64 @@
                 }
             }
 
-            // Draw buttons: BACK, SKIP, CONFIRM
-            const btnY2 = boxY + boxH + 35;
-            const btnH2 = 40;
-            const btnW2 = 95;
-            const btnGap2 = 10;
-            const totalBtnW = btnW2 * 3 + btnGap2 * 2;
-            const btnStartX2 = (TABLE_WIDTH - totalBtnW) / 2;
-
-            // BACK button
-            ctx.strokeStyle = '#ff8800';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(btnStartX2, btnY2, btnW2, btnH2);
-            ctx.fillStyle = '#ff8800';
-            ctx.font = 'bold 16px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('BACK', btnStartX2 + btnW2 / 2, btnY2 + 26);
-
-            // SKIP button
-            const skipBtnX = btnStartX2 + btnW2 + btnGap2;
-            ctx.strokeStyle = '#888888';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(skipBtnX, btnY2, btnW2, btnH2);
-            ctx.fillStyle = '#888888';
-            ctx.font = 'bold 16px Arial';
-            ctx.fillText('SKIP', skipBtnX + btnW2 / 2, btnY2 + 26);
-
-            // CONFIRM button
-            const confirmBtnX = btnStartX2 + (btnW2 + btnGap2) * 2;
+            // CONFIRM letter button
+            const cfmBtnX = TABLE_WIDTH / 2 - 55;
+            const cfmBtnY = boxY + boxH + 30;
             ctx.strokeStyle = '#00ff00';
             ctx.lineWidth = 2;
-            ctx.strokeRect(confirmBtnX, btnY2, btnW2, btnH2);
+            ctx.strokeRect(cfmBtnX, cfmBtnY, 110, 36);
             ctx.fillStyle = '#00ff00';
-            ctx.font = 'bold 16px Arial';
-            ctx.fillText('OK', confirmBtnX + btnW2 / 2, btnY2 + 26);
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('CONFIRM', TABLE_WIDTH / 2, cfmBtnY + 24);
 
+            // START button
+            const startBtnX = TABLE_WIDTH / 2 - 75;
+            const startBtnY = TABLE_HEIGHT / 2 + 90;
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(startBtnX, startBtnY, 150, 50);
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 22px Arial';
+            ctx.fillText('START', TABLE_WIDTH / 2, startBtnY + 34);
+
+            // Instructions
             ctx.fillStyle = '#666666';
             ctx.font = '10px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('L/R: SCROLL   BOTH/OK: CONFIRM   PLUNGE: BACK', TABLE_WIDTH / 2, btnY2 + btnH2 + 18);
+            ctx.fillText('L/R: SCROLL   V/CONFIRM: NEXT LETTER   START: PLAY', TABLE_WIDTH / 2, startBtnY + 68);
+        }
+
+        else if (gameState === STATE_GAME_OVER) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 32px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 24px Arial';
+            ctx.fillText(finalScore.toString(), TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 40);
+
+            if (sessionInitials) {
+                ctx.fillStyle = '#00ffff';
+                ctx.font = '16px Arial';
+                ctx.fillText(sessionInitials, TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 65);
+            }
+
+            if (maxTableLevel > 0) {
+                ctx.fillStyle = '#ff8800';
+                ctx.font = '14px Arial';
+                ctx.fillText('TABLE LEVEL: ' + maxTableLevel, TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 85);
+            }
+
+            if (isNewHighScore && frame % 20 < 14) {
+                ctx.fillStyle = '#ffff00';
+                ctx.font = 'bold 18px Arial';
+                ctx.fillText('NEW HIGH SCORE!', TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 110);
+            }
         }
 
         else if (gameState === STATE_MENU) {
@@ -1030,6 +1246,12 @@
             ctx.fillStyle = '#ffff00';
             ctx.font = 'bold 30px Arial';
             ctx.fillText(finalScore.toString(), TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 15);
+
+            if (sessionInitials) {
+                ctx.fillStyle = '#00ffff';
+                ctx.font = '14px Arial';
+                ctx.fillText('Player: ' + sessionInitials, TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 40);
+            }
 
             const btnY = TABLE_HEIGHT / 2 + 10;
             const btnW = 130;
@@ -1056,7 +1278,7 @@
             ctx.fillStyle = '#666666';
             ctx.font = '11px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('LEFT: SCORES    RIGHT: PLAY AGAIN', TABLE_WIDTH / 2, btnY + btnH + 30);
+            ctx.fillText('LEFT: SCORES    RIGHT/V: PLAY AGAIN', TABLE_WIDTH / 2, btnY + btnH + 30);
         }
 
         else if (gameState === STATE_LEADERBOARD) {
@@ -1068,43 +1290,58 @@
             ctx.textAlign = 'center';
             ctx.fillText('HIGH SCORES', TABLE_WIDTH / 2, 70);
 
-            ctx.strokeStyle = '#ff00ff';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(TABLE_WIDTH / 2 - 80, 80);
-            ctx.lineTo(TABLE_WIDTH / 2 + 80, 80);
-            ctx.stroke();
+            // LOCAL/ONLINE toggle
+            const togY = 88;
+            ctx.font = '12px Arial';
+            ctx.fillStyle = !showOnlineScores ? '#00ffff' : '#555555';
+            ctx.textAlign = 'right';
+            ctx.fillText('LOCAL', TABLE_WIDTH / 2 - 8, togY + 15);
+            ctx.fillStyle = showOnlineScores ? '#00ffff' : '#555555';
+            ctx.textAlign = 'left';
+            ctx.fillText('ONLINE', TABLE_WIDTH / 2 + 8, togY + 15);
+            ctx.fillStyle = '#444444';
+            ctx.fillText('|', TABLE_WIDTH / 2 - 2, togY + 15);
 
-            if (highScores.length === 0) {
+            const scoresToShow = showOnlineScores ? onlineScores : highScores;
+
+            if (scoresToShow.length === 0) {
                 ctx.fillStyle = '#555555';
                 ctx.font = '16px Arial';
                 ctx.textAlign = 'center';
-                ctx.fillText('NO SCORES YET', TABLE_WIDTH / 2, 180);
+                ctx.fillText(showOnlineScores ? 'NO ONLINE SCORES' : 'NO SCORES YET', TABLE_WIDTH / 2, 180);
             } else {
-                for (let i = 0; i < highScores.length && i < MAX_HIGH_SCORES; i++) {
-                    const hs = highScores[i];
-                    const y = 115 + i * 35;
+                for (let i = 0; i < scoresToShow.length && i < MAX_HIGH_SCORES; i++) {
+                    const hs = scoresToShow[i];
+                    const y = 130 + i * 38;
 
                     ctx.fillStyle = '#888888';
                     ctx.font = '14px Arial';
                     ctx.textAlign = 'right';
-                    ctx.fillText((i + 1) + '.', TABLE_WIDTH / 2 - 90, y);
+                    ctx.fillText((i + 1) + '.', TABLE_WIDTH / 2 - 100, y);
 
                     ctx.fillStyle = '#00ffff';
                     ctx.font = 'bold 14px Arial';
                     ctx.textAlign = 'left';
-                    ctx.fillText(hs.initials, TABLE_WIDTH / 2 - 75, y);
+                    ctx.fillText(hs.initials || '???', TABLE_WIDTH / 2 - 85, y);
 
                     ctx.fillStyle = '#ffffff';
                     ctx.font = '14px Arial';
                     ctx.textAlign = 'right';
-                    ctx.fillText(hs.score.toString(), TABLE_WIDTH / 2 + 90, y);
+                    ctx.fillText(hs.score.toString(), TABLE_WIDTH / 2 + 60, y);
+
+                    // Table level
+                    if (hs.maxTableLevel) {
+                        ctx.fillStyle = '#ff8800';
+                        ctx.font = '10px Arial';
+                        ctx.textAlign = 'left';
+                        ctx.fillText('Lv' + hs.maxTableLevel, TABLE_WIDTH / 2 + 68, y);
+                    }
 
                     const d = new Date(hs.date);
                     ctx.fillStyle = '#555555';
                     ctx.font = '10px Arial';
                     ctx.textAlign = 'right';
-                    ctx.fillText(d.toLocaleDateString(), TABLE_WIDTH / 2 + 90, y + 13);
+                    ctx.fillText(d.toLocaleDateString(), TABLE_WIDTH / 2 + 60, y + 14);
                 }
             }
 
@@ -1270,6 +1507,23 @@
             ctx.restore();
         }
 
+        // Draw extra ball text
+        if (extraBallTimer > 0 && levelUpTimer <= 0) {
+            const ebAlpha = Math.min(1, extraBallTimer / 20);
+            ctx.save();
+            ctx.globalAlpha = ebAlpha;
+            ctx.shadowColor = '#ff00ff';
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 28px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('EXTRA BALL!', TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 14px Arial';
+            ctx.fillText('+1 BALL', TABLE_WIDTH / 2, TABLE_HEIGHT / 3 + 24);
+            ctx.restore();
+        }
+
         // Draw particles
         for (const p of particles) {
             ctx.globalAlpha = Math.max(0, p.life / 80);
@@ -1335,9 +1589,11 @@
 
     // === INPUT HANDLING ===
     document.addEventListener('keydown', (e) => {
+        initAudio();
         if (e.code === 'ShiftLeft' || e.key === 'z' || e.key === 'Z') keys.z = true;
         if (e.code === 'ShiftRight' || e.key === 'x' || e.key === 'X') keys.x = true;
         if (e.code === 'Space' || e.key === 'c' || e.key === 'C') keys.c = true;
+        if (e.key === 'v' || e.key === 'V') keys.v = true;
         if (e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') e.preventDefault();
     });
 
@@ -1345,6 +1601,7 @@
         if (e.code === 'ShiftLeft' || e.key === 'z' || e.key === 'Z') keys.z = false;
         if (e.code === 'ShiftRight' || e.key === 'x' || e.key === 'X') keys.x = false;
         if (e.code === 'Space' || e.key === 'c' || e.key === 'C') keys.c = false;
+        if (e.key === 'v' || e.key === 'V') keys.v = false;
     });
 
     // === TOUCH CONTROLS ===
@@ -1354,6 +1611,7 @@
     let activeTouches = new Map();
 
     function handleTouchStart(e) {
+        initAudio();
         for (let touch of e.changedTouches) {
             const x = touch.clientX;
             const y = touch.clientY;
@@ -1363,55 +1621,12 @@
             if (gameState !== STATE_PLAYING) {
                 const gameX = (x - offsetX) / scale;
                 const gameY = (y - offsetY) / scale;
-
-                if (gameState === STATE_ENTER_INITIALS) {
-                    const bBoxH = 52;
-                    const bBoxY = TABLE_HEIGHT / 2 - 25;
-                    const bY = bBoxY + bBoxH + 35;
-                    const bH = 40;
-                    const bW = 95;
-                    const bGap = 10;
-                    const bTotal = bW * 3 + bGap * 2;
-                    const bStart = (TABLE_WIDTH - bTotal) / 2;
-
-                    if (gameY >= bY && gameY <= bY + bH) {
-                        if (gameX >= bStart && gameX <= bStart + bW) {
-                            overlayTap = 'back'; continue;
-                        }
-                        if (gameX >= bStart + bW + bGap && gameX <= bStart + bW * 2 + bGap) {
-                            overlayTap = 'skip'; continue;
-                        }
-                        if (gameX >= bStart + (bW + bGap) * 2 && gameX <= bStart + (bW + bGap) * 2 + bW) {
-                            overlayTap = 'confirm'; continue;
-                        }
-                    }
+                const action = checkOverlayButtonHit(gameX, gameY);
+                if (action) {
+                    overlayTap = action;
+                    continue;
                 }
-
-                if (gameState === STATE_MENU) {
-                    const mbY = TABLE_HEIGHT / 2 + 10;
-                    const mbW = 130;
-                    const mbH = 50;
-                    const mGap = 16;
-                    const leftBX = TABLE_WIDTH / 2 - mbW - mGap / 2;
-                    const rightBX = TABLE_WIDTH / 2 + mGap / 2;
-
-                    if (gameY >= mbY && gameY <= mbY + mbH) {
-                        if (gameX >= leftBX && gameX <= leftBX + mbW) {
-                            overlayTap = 'scores'; continue;
-                        }
-                        if (gameX >= rightBX && gameX <= rightBX + mbW) {
-                            overlayTap = 'play'; continue;
-                        }
-                    }
-                }
-
-                if (gameState === STATE_LEADERBOARD) {
-                    const lbBX = TABLE_WIDTH / 2 - 60;
-                    const lbBY = TABLE_HEIGHT - 75;
-                    if (gameX >= lbBX && gameX <= lbBX + 120 && gameY >= lbBY && gameY <= lbBY + 40) {
-                        overlayTap = 'back_to_menu'; continue;
-                    }
-                }
+                // Fallthrough for left/right scroll in welcome/menu states
             }
 
             if (x < width * 0.5) {
@@ -1462,10 +1677,29 @@
     document.addEventListener('touchend', handleTouchEnd, { passive: false });
     document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
-    // Mouse fallback
+    // Mouse controls with overlay button support
     canvas.addEventListener('mousedown', (e) => {
+        initAudio();
         const x = e.clientX;
+        const y = e.clientY;
         const width = window.innerWidth;
+
+        // Check overlay buttons in non-playing states
+        if (gameState !== STATE_PLAYING) {
+            const gameX = (x - offsetX) / scale;
+            const gameY = (y - offsetY) / scale;
+            const action = checkOverlayButtonHit(gameX, gameY);
+            if (action) {
+                overlayTap = action;
+                return;
+            }
+            // Left/right half for flipper scroll in menus
+            if (e.button === 0) {
+                if (x < width * 0.5) { keys.z = true; } else { keys.x = true; }
+            }
+            return;
+        }
+
         if (e.button === 0) {
             if (x < width * 0.5) { keys.z = true; } else { keys.x = true; }
         }
@@ -1481,6 +1715,10 @@
 
     // === INITIALIZATION ===
     loadHighScores();
+    initialsChars = loadSavedInitials();
+    currentInitialPos = 0;
+    gameState = STATE_WELCOME;
+    document.getElementById('instructions').classList.add('hidden');
     window.addEventListener('resize', resize);
     resize();
     buildTable();
