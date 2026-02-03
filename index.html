@@ -600,6 +600,20 @@
     }
 
     function setupNewBall() {
+        // Safety: if modifier reduced ballCount to 0, go to game over
+        if (ballCount <= 0) {
+            finalScore = score;
+            isNewHighScore = checkHighScore(score);
+            gameState = STATE_GAME_OVER;
+            gameOverTimer = 90;
+            trackStat('gamesPlayed');
+            trackStat('totalScore', finalScore);
+            if (isNewHighScore && sessionInitials) {
+                addHighScore(sessionInitials, finalScore, maxTableLevel);
+                submitScoreToFirebase(sessionInitials, finalScore, maxTableLevel);
+            }
+            return;
+        }
         const ball = objects[0];
         ball.x = CENTER_X + DOME_RADIUS - BALL_RADIUS;
         ball.y = SHOOTER_Y - 20;
@@ -620,6 +634,10 @@
             ballSaveAvailable = true;
         }
         ballStartScore = score;
+        // Reset key states to prevent stuck flippers from menu selection
+        keys.z = false;
+        keys.x = false;
+        keys.c = false;
         gameState = STATE_PLAYING;
     }
 
@@ -1025,6 +1043,11 @@
                             document.getElementById('score').textContent = score;
                             allOrNothingActive = false;
                         }
+                        // Move ball off-screen to prevent re-triggering in substep loop
+                        ball.x = -100;
+                        ball.y = -100;
+                        ball.vx = 0;
+                        ball.vy = 0;
                         // Show modifier choice before next ball
                         generateModifierChoices();
                         gameState = STATE_CHOOSE_MODIFIER;
@@ -1321,10 +1344,10 @@
         }
 
         else if (gameState === STATE_CHOOSE_MODIFIER) {
-            if ((leftJust && !keys.x) || overlayTap === 'mod_left') {
+            if (leftJust || overlayTap === 'mod_left') {
                 applyModifier(modifierChoiceLeft);
                 setupNewBall();
-            } else if ((rightJust && !keys.z) || overlayTap === 'mod_right') {
+            } else if (rightJust || overlayTap === 'mod_right') {
                 applyModifier(modifierChoiceRight);
                 setupNewBall();
             }
