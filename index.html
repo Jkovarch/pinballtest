@@ -287,6 +287,8 @@
     const STATE_GAME_OVER = 2;
     const STATE_MENU = 3;
     const STATE_LEADERBOARD = 4;
+    const STATE_STATS = 5;
+    const STATE_CHOOSE_MODIFIER = 6;
 
     const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const MAX_HIGH_SCORES = 10;
@@ -354,6 +356,14 @@
     // Session state
     let sessionInitials = null;
     let playerStats = null;
+
+    // Modifier system
+    let targetValueMultiplier = 1;
+    let allOrNothingActive = false;
+    let allOrNothingScoreBackup = 0;
+    let extraBallSave3 = false;
+    let modifierChoiceLeft = null;
+    let modifierChoiceRight = null;
 
     // === HIGH SCORE FUNCTIONS ===
     function loadHighScores() {
@@ -428,6 +438,80 @@
         savePlayerStats(sessionInitials, playerStats);
     }
 
+    // === MODIFIERS ===
+    const MODIFIERS = [
+        { id: 'double_mult', name: 'DOUBLE', name2: 'MULTIPLIER', desc: 'Doubles your current multiplier' },
+        { id: 'upgrade_table', name: 'UPGRADE', name2: 'TABLE', desc: 'Level up the table' },
+        { id: 'ball_save_3', name: 'EXTRA BALL', name2: 'SAVE', desc: 'Ball save on last ball' },
+        { id: 'light_outlanes', name: 'LIGHT', name2: 'OUTLANES', desc: 'Light outlane lanes' },
+        { id: 'extra_ball', name: 'EXTRA', name2: 'BALL', desc: 'Gain one extra ball' },
+        { id: 'double_down', name: 'DOUBLE', name2: 'DOWN', desc: 'Targets 2x, lose 1 ball', minBalls: 2 },
+        { id: 'double_double', name: 'DOUBLE', name2: 'DOUBLE DOWN', desc: 'Targets 2x, score 2x, last ball', minBalls: 2 },
+        { id: 'all_or_nothing', name: 'ALL OR', name2: 'NOTHING', desc: 'Saucer = 3x, drain = 0' }
+    ];
+
+    function generateModifierChoices() {
+        const valid = MODIFIERS.filter(m => !m.minBalls || ballCount >= m.minBalls);
+        const shuffled = valid.slice().sort(() => Math.random() - 0.5);
+        modifierChoiceLeft = shuffled[0] || null;
+        modifierChoiceRight = shuffled[1] || (shuffled[0] ? shuffled[0] : null);
+        // Ensure two different choices if possible
+        if (modifierChoiceLeft && modifierChoiceRight && modifierChoiceLeft.id === modifierChoiceRight.id && valid.length > 1) {
+            modifierChoiceRight = shuffled.find(m => m.id !== modifierChoiceLeft.id) || shuffled[1];
+        }
+    }
+
+    function applyModifier(mod) {
+        if (!mod) return;
+        switch (mod.id) {
+            case 'double_mult':
+                scoreMultiplier *= 2;
+                trackStat('maxMultiplier', scoreMultiplier);
+                break;
+            case 'upgrade_table':
+                targetLevel++;
+                maxTableLevel = Math.max(maxTableLevel, targetLevel);
+                dropTargets.forEach(dt => { dt.active = true; });
+                break;
+            case 'ball_save_3':
+                extraBallSave3 = true;
+                break;
+            case 'light_outlanes':
+                laneLights[0] = true;
+                laneLights[3] = true;
+                if (laneLights.every(l => l)) {
+                    ballCount++;
+                    document.getElementById('balls').textContent = ballCount;
+                    trackStat('extraBallsEarned');
+                    laneLights = [false, false, false, false];
+                    extraBallTimer = 120;
+                    createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 40);
+                    createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
+                }
+                break;
+            case 'extra_ball':
+                ballCount++;
+                document.getElementById('balls').textContent = ballCount;
+                break;
+            case 'double_down':
+                targetValueMultiplier *= 2;
+                ballCount--;
+                document.getElementById('balls').textContent = ballCount;
+                break;
+            case 'double_double':
+                targetValueMultiplier *= 2;
+                score *= 2;
+                document.getElementById('score').textContent = score;
+                ballCount = 1;
+                document.getElementById('balls').textContent = ballCount;
+                break;
+            case 'all_or_nothing':
+                allOrNothingActive = true;
+                allOrNothingScoreBackup = score;
+                break;
+        }
+    }
+
     // === PARTICLES ===
     function createParticles(x, y, count) {
         const colors = ['#ff00ff', '#00ffff', '#ffff00', '#ff0000', '#00ff00', '#ff8800'];
@@ -479,6 +563,12 @@
         levelUpTimer = 0;
         extraBallTimer = 0;
         saucerLevelUpDone = false;
+        targetValueMultiplier = 1;
+        allOrNothingActive = false;
+        allOrNothingScoreBackup = 0;
+        extraBallSave3 = false;
+        modifierChoiceLeft = null;
+        modifierChoiceRight = null;
 
         const ball = objects[0];
         ball.x = SHOOTER_X;
@@ -507,6 +597,30 @@
         keys.x = false;
         keys.c = false;
         keys.v = false;
+    }
+
+    function setupNewBall() {
+        const ball = objects[0];
+        ball.x = CENTER_X + DOME_RADIUS - BALL_RADIUS;
+        ball.y = SHOOTER_Y - 20;
+        ball.vx = 0;
+        ball.vy = 0;
+        const rstStart = 1 + FLIPPER_SEGMENTS * 2;
+        for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
+            const seg = objects[rstStart + si];
+            if (seg && seg.isShooter) {
+                seg.y = SHOOTER_Y + si;
+                seg.vy = 0;
+            }
+        }
+        // Reset ball save for new ball
+        ballSaveAvailable = true;
+        // Extra ball save on last ball (ball 3 modifier)
+        if (extraBallSave3 && ballCount === 1) {
+            ballSaveAvailable = true;
+        }
+        ballStartScore = score;
+        gameState = STATE_PLAYING;
     }
 
     // === OBJECT CREATION ===
@@ -699,6 +813,13 @@
             if (gameX >= cpX && gameX <= cpX + cpW && gameY >= cpY && gameY <= cpY + 35) {
                 return 'change_player';
             }
+            // Stats button
+            const stBtnW = 100;
+            const stBtnX = TABLE_WIDTH / 2 - stBtnW / 2;
+            const stBtnY = cpY + 45;
+            if (gameX >= stBtnX && gameX <= stBtnX + stBtnW && gameY >= stBtnY && gameY <= stBtnY + 35) {
+                return 'stats';
+            }
         }
 
         if (gameState === STATE_LEADERBOARD) {
@@ -713,6 +834,28 @@
             const togY = 88;
             if (gameX >= togX && gameX <= togX + 160 && gameY >= togY && gameY <= togY + 25) {
                 return 'toggle_scores';
+            }
+        }
+
+        if (gameState === STATE_STATS) {
+            const bkX = TABLE_WIDTH / 2 - 60;
+            const bkY = TABLE_HEIGHT - 75;
+            if (gameX >= bkX && gameX <= bkX + 120 && gameY >= bkY && gameY <= bkY + 40) {
+                return 'back_to_menu';
+            }
+        }
+
+        if (gameState === STATE_CHOOSE_MODIFIER) {
+            const boxW = 160;
+            const boxH = 180;
+            const boxY = TABLE_HEIGHT / 2 - boxH / 2;
+            const leftBoxX = TABLE_WIDTH / 2 - boxW - 10;
+            const rightBoxX = TABLE_WIDTH / 2 + 10;
+            if (gameX >= leftBoxX && gameX <= leftBoxX + boxW && gameY >= boxY && gameY <= boxY + boxH) {
+                return 'mod_left';
+            }
+            if (gameX >= rightBoxX && gameX <= rightBoxX + boxW && gameY >= boxY && gameY <= boxY + boxH) {
+                return 'mod_right';
             }
         }
 
@@ -798,7 +941,7 @@
                     if (ball.x > gapLeft && ball.x < gapRight) {
                         topLaneLights[g] = true;
                         if (topLaneLights.every(l => l)) {
-                            score += 50 * scoreMultiplier;
+                            score += 50 * scoreMultiplier * targetValueMultiplier;
                             document.getElementById('score').textContent = score;
                             topLaneLights = [false, false, false];
                         }
@@ -817,7 +960,7 @@
                     const sdy = ball.y - sty;
                     if (Math.sqrt(sdx * sdx + sdy * sdy) < BALL_RADIUS + 8) {
                         spotTargets[i] = true;
-                        score += (3 + targetLevel * 2) * scoreMultiplier;
+                        score += (3 + targetLevel * 2) * scoreMultiplier * targetValueMultiplier;
                         document.getElementById('score').textContent = score;
                         if (spotTargets.every(s => s)) {
                             spotCompletions++;
@@ -852,7 +995,7 @@
 
             // Check if ball is lost
             if (ball.y > TABLE_HEIGHT + 50) {
-                if (ballSaveAvailable && (score - ballStartScore) < 20) {
+                if (ballSaveAvailable && ((score - ballStartScore) < 20 || (extraBallSave3 && ballCount === 1))) {
                     // Ball save!
                     ballSaveAvailable = false;
                     ballSaveTimer = 120;
@@ -876,23 +1019,22 @@
                     playSound('BallDrain');
 
                     if (ballCount > 0) {
-                        ball.x = CENTER_X + DOME_RADIUS - BALL_RADIUS;
-                        ball.y = SHOOTER_Y - 20;
-                        ball.vx = 0;
-                        ball.vy = 0;
-                        const rstStart = 1 + FLIPPER_SEGMENTS * 2;
-                        for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
-                            const seg = objects[rstStart + si];
-                            if (seg && seg.isShooter) {
-                                seg.y = SHOOTER_Y + si;
-                                seg.vy = 0;
-                            }
+                        // Handle All or Nothing drain penalty
+                        if (allOrNothingActive) {
+                            score = 0;
+                            document.getElementById('score').textContent = score;
+                            allOrNothingActive = false;
                         }
-                        // Reset ball save for new ball
-                        ballSaveAvailable = true;
-                        ballStartScore = score;
+                        // Show modifier choice before next ball
+                        generateModifierChoices();
+                        gameState = STATE_CHOOSE_MODIFIER;
                     } else {
                         // Game over
+                        if (allOrNothingActive) {
+                            score = 0;
+                            document.getElementById('score').textContent = score;
+                            allOrNothingActive = false;
+                        }
                         finalScore = score;
                         isNewHighScore = checkHighScore(score);
                         gameState = STATE_GAME_OVER;
@@ -942,10 +1084,10 @@
                             dropTargets.forEach(dt => {
                                 if (dt.dropGroup === obj.dropGroup) { dt.active = false; dt.bounce = 10; }
                             });
-                            score += (5 + targetLevel * 3) * scoreMultiplier;
+                            score += (5 + targetLevel * 3) * scoreMultiplier * targetValueMultiplier;
                             document.getElementById('score').textContent = score;
                             if (dropTargets.every(dt => !dt.active)) {
-                                score += (25 + targetLevel * 10) * scoreMultiplier;
+                                score += (25 + targetLevel * 10) * scoreMultiplier * targetValueMultiplier;
                                 document.getElementById('score').textContent = score;
                                 trackStat('allTargetsCleared');
                                 setTimeout(() => { dropTargets.forEach(dt => { dt.active = true; }); }, 1500);
@@ -961,8 +1103,8 @@
                                 if (obj.isCenterBumper) trackStat('colorBumperHits');
                             }
                             if (obj.y < FLIPPER_Y - 80) {
-                                if (obj.isHighValue) { score += 5 * scoreMultiplier; }
-                                else { score += scoreMultiplier; }
+                                if (obj.isHighValue) { score += 5 * scoreMultiplier * targetValueMultiplier; }
+                                else { score += scoreMultiplier * targetValueMultiplier; }
                                 document.getElementById('score').textContent = score;
                             }
                             restitution = BUMPER_RESTITUTION;
@@ -1033,8 +1175,14 @@
                         targetLevel++;
                         saucerLevel++;
                         maxTableLevel = Math.max(maxTableLevel, targetLevel);
-                        score += 50 * scoreMultiplier;
+                        score += 50 * scoreMultiplier * targetValueMultiplier;
                         document.getElementById('score').textContent = score;
+                        if (allOrNothingActive) {
+                            score *= 3;
+                            document.getElementById('score').textContent = score;
+                            allOrNothingActive = false;
+                            createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 3, 50);
+                        }
                         saucerLevelUpDone = true;
                         levelUpTimer = 90;
                         saucerTimer = 90;
@@ -1042,8 +1190,14 @@
                         createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 4);
                         playSound('TableLevelUp');
                     } else {
-                        score += 15 * scoreMultiplier;
+                        score += 15 * scoreMultiplier * targetValueMultiplier;
                         document.getElementById('score').textContent = score;
+                        if (allOrNothingActive) {
+                            score *= 3;
+                            document.getElementById('score').textContent = score;
+                            allOrNothingActive = false;
+                            createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 3, 50);
+                        }
                         saucerActive = false;
                         const ball = objects[0];
                         ball.vy = -0.4;
@@ -1150,6 +1304,8 @@
                 playerStats = null;
                 currentInitialPos = 0;
                 gameState = STATE_WELCOME;
+            } else if (overlayTap === 'stats') {
+                gameState = STATE_STATS;
             }
         }
 
@@ -1161,6 +1317,22 @@
                 if (showOnlineScores) {
                     loadOnlineScores(scores => { onlineScores = scores; });
                 }
+            }
+        }
+
+        else if (gameState === STATE_CHOOSE_MODIFIER) {
+            if ((leftJust && !keys.x) || overlayTap === 'mod_left') {
+                applyModifier(modifierChoiceLeft);
+                setupNewBall();
+            } else if ((rightJust && !keys.z) || overlayTap === 'mod_right') {
+                applyModifier(modifierChoiceRight);
+                setupNewBall();
+            }
+        }
+
+        else if (gameState === STATE_STATS) {
+            if (leftJust || rightJust || plungeJust || vJust || overlayTap === 'back_to_menu') {
+                gameState = STATE_MENU;
             }
         }
 
@@ -1345,6 +1517,18 @@
             ctx.font = 'bold 13px Arial';
             ctx.textAlign = 'center';
             ctx.fillText('CHANGE PLAYER', TABLE_WIDTH / 2, cpBtnY + 23);
+
+            // STATS button
+            const stBtnW = 100;
+            const stBtnX = TABLE_WIDTH / 2 - stBtnW / 2;
+            const stBtnY = cpBtnY + 45;
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(stBtnX, stBtnY, stBtnW, 35);
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 13px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('STATS', TABLE_WIDTH / 2, stBtnY + 23);
         }
 
         else if (gameState === STATE_LEADERBOARD) {
@@ -1423,6 +1607,110 @@
             ctx.font = 'bold 16px Arial';
             ctx.textAlign = 'center';
             ctx.fillText('BACK', TABLE_WIDTH / 2, lbBackY + 26);
+        }
+
+        else if (gameState === STATE_CHOOSE_MODIFIER) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('CHOOSE A BONUS', TABLE_WIDTH / 2, TABLE_HEIGHT / 4);
+
+            const boxW = 160;
+            const boxH = 180;
+            const boxY = TABLE_HEIGHT / 2 - boxH / 2;
+            const leftBoxX = TABLE_WIDTH / 2 - boxW - 10;
+            const rightBoxX = TABLE_WIDTH / 2 + 10;
+
+            // Left box
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(leftBoxX, boxY, boxW, boxH);
+            if (modifierChoiceLeft) {
+                ctx.fillStyle = '#ff00ff';
+                ctx.font = 'bold 18px Arial';
+                ctx.fillText(modifierChoiceLeft.name, leftBoxX + boxW / 2, boxY + 50);
+                ctx.fillText(modifierChoiceLeft.name2, leftBoxX + boxW / 2, boxY + 75);
+                ctx.fillStyle = '#aaaaaa';
+                ctx.font = '11px Arial';
+                ctx.fillText(modifierChoiceLeft.desc, leftBoxX + boxW / 2, boxY + 110);
+            }
+
+            // Right box
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(rightBoxX, boxY, boxW, boxH);
+            if (modifierChoiceRight) {
+                ctx.fillStyle = '#00ffff';
+                ctx.font = 'bold 18px Arial';
+                ctx.fillText(modifierChoiceRight.name, rightBoxX + boxW / 2, boxY + 50);
+                ctx.fillText(modifierChoiceRight.name2, rightBoxX + boxW / 2, boxY + 75);
+                ctx.fillStyle = '#aaaaaa';
+                ctx.font = '11px Arial';
+                ctx.fillText(modifierChoiceRight.desc, rightBoxX + boxW / 2, boxY + 110);
+            }
+
+            ctx.fillStyle = '#666666';
+            ctx.font = '11px Arial';
+            ctx.fillText('LEFT / RIGHT to choose', TABLE_WIDTH / 2, TABLE_HEIGHT - 80);
+        }
+
+        else if (gameState === STATE_STATS) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+            ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('PLAYER STATS', TABLE_WIDTH / 2, 70);
+
+            if (sessionInitials) {
+                ctx.fillStyle = '#00ffff';
+                ctx.font = 'bold 18px Arial';
+                ctx.fillText(sessionInitials, TABLE_WIDTH / 2, 100);
+            }
+
+            const stats = playerStats || (sessionInitials ? loadPlayerStats(sessionInitials) : null);
+            if (stats) {
+                const statLines = [
+                    ['Games Played', stats.gamesPlayed || 0],
+                    ['Total Score', stats.totalScore || 0],
+                    ['Targets Cleared', stats.allTargetsCleared || 0],
+                    ['Color Bumper Hits', stats.colorBumperHits || 0],
+                    ['Saucer Captures', stats.saucerCaptures || 0],
+                    ['Extra Balls', stats.extraBallsEarned || 0],
+                    ['Max Multiplier', (stats.maxMultiplier || 1) + 'x']
+                ];
+
+                for (let i = 0; i < statLines.length; i++) {
+                    const y = 140 + i * 36;
+                    ctx.fillStyle = '#888888';
+                    ctx.font = '14px Arial';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(statLines[i][0], 60, y);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 16px Arial';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(statLines[i][1].toString(), TABLE_WIDTH - 60, y);
+                }
+            } else {
+                ctx.fillStyle = '#555555';
+                ctx.font = '16px Arial';
+                ctx.fillText('NO STATS YET', TABLE_WIDTH / 2, 200);
+            }
+
+            // BACK button
+            const bkBtnX = TABLE_WIDTH / 2 - 60;
+            const bkBtnY = TABLE_HEIGHT - 75;
+            ctx.strokeStyle = '#ff8800';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(bkBtnX, bkBtnY, 120, 40);
+            ctx.fillStyle = '#ff8800';
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('BACK', TABLE_WIDTH / 2, bkBtnY + 27);
         }
     }
 
