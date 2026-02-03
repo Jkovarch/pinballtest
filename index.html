@@ -364,6 +364,8 @@
     let extraBallSave3 = false;
     let modifierChoiceLeft = null;
     let modifierChoiceRight = null;
+    let modifierScreenTimer = 0;
+    let ballsLost = 0;
 
     // === HIGH SCORE FUNCTIONS ===
     function loadHighScores() {
@@ -411,7 +413,7 @@
 
     // === PLAYER STATS ===
     function defaultStats() {
-        return { allTargetsCleared: 0, colorBumperHits: 0, saucerCaptures: 0, extraBallsEarned: 0, maxMultiplier: 1, gamesPlayed: 0, totalScore: 0 };
+        return { allTargetsCleared: 0, colorBumperHits: 0, saucerCaptures: 0, extraBallsEarned: 0, maxMultiplier: 1, gamesPlayed: 0, totalScore: 0, modPicks: {} };
     }
 
     function loadPlayerStats(initials) {
@@ -447,18 +449,30 @@
         { id: 'extra_ball', name: 'EXTRA', name2: 'BALL', desc: 'Gain one extra ball' },
         { id: 'double_down', name: 'DOUBLE', name2: 'DOWN', desc: 'Targets 2x, lose 1 ball', minBalls: 2 },
         { id: 'double_double', name: 'DOUBLE', name2: 'DOUBLE DOWN', desc: 'Targets 2x, score 2x, last ball', minBalls: 2 },
-        { id: 'all_or_nothing', name: 'ALL OR', name2: 'NOTHING', desc: 'Saucer = 3x, drain = 0' }
+        { id: 'all_or_nothing', name: 'ALL OR', name2: 'NOTHING', desc: 'Saucer = 3x, drain = 0' },
+        { id: 'mulligan', name: 'MULLIGAN', name2: '', desc: 'Get that ball back, keep score', condition: () => ballsLost === 1 && score < 150 },
+        { id: 'practice_shot', name: 'PRACTICE', name2: 'SHOT', desc: 'Get that ball back, keep score', condition: () => ballsLost === 1 && score < 50 },
+        { id: 'rewind', name: 'REWIND', name2: '', desc: 'Back to 3 balls, score resets to 0', condition: () => ballsLost === 1 && score < 300 },
+        { id: 'buy_in', name: 'BUY IN', name2: '-1000', desc: 'Pay 1000 for an extra ball', condition: () => score > 1000 && score <= 5000 },
+        { id: 'pay_up', name: 'PAY UP', name2: '-5000', desc: 'Pay 5000 for an extra ball', condition: () => score > 5000 },
+        { id: 'income_tax', name: 'INCOME', name2: 'TAX', desc: 'Pay 25% score for ball save', condition: () => score > 1000 },
+        { id: 'tax_avoidance', name: 'TAX', name2: 'AVOIDANCE', desc: 'Pay 25% score for extra ball', condition: () => score > 5000 },
+        { id: 'all_in', name: 'ALL IN', name2: '', desc: 'Pay 100% score, back to 3 balls', condition: () => score > 5000 }
     ];
 
     function generateModifierChoices() {
-        const valid = MODIFIERS.filter(m => !m.minBalls || ballCount >= m.minBalls);
+        const valid = MODIFIERS.filter(m => {
+            if (m.minBalls && ballCount < m.minBalls) return false;
+            if (m.condition && !m.condition()) return false;
+            return true;
+        });
         const shuffled = valid.slice().sort(() => Math.random() - 0.5);
         modifierChoiceLeft = shuffled[0] || null;
-        modifierChoiceRight = shuffled[1] || (shuffled[0] ? shuffled[0] : null);
-        // Ensure two different choices if possible
+        modifierChoiceRight = shuffled[1] || null;
         if (modifierChoiceLeft && modifierChoiceRight && modifierChoiceLeft.id === modifierChoiceRight.id && valid.length > 1) {
             modifierChoiceRight = shuffled.find(m => m.id !== modifierChoiceLeft.id) || shuffled[1];
         }
+        modifierScreenTimer = 0;
     }
 
     function applyModifier(mod) {
@@ -509,6 +523,52 @@
                 allOrNothingActive = true;
                 allOrNothingScoreBackup = score;
                 break;
+            case 'mulligan':
+            case 'practice_shot':
+                ballCount++;
+                document.getElementById('balls').textContent = ballCount;
+                break;
+            case 'rewind':
+                ballCount = 3;
+                score = 0;
+                document.getElementById('score').textContent = score;
+                document.getElementById('balls').textContent = ballCount;
+                break;
+            case 'buy_in':
+                score -= 1000;
+                ballCount++;
+                document.getElementById('score').textContent = score;
+                document.getElementById('balls').textContent = ballCount;
+                break;
+            case 'pay_up':
+                score -= 5000;
+                ballCount++;
+                document.getElementById('score').textContent = score;
+                document.getElementById('balls').textContent = ballCount;
+                break;
+            case 'income_tax':
+                score -= Math.floor(score * 0.25);
+                document.getElementById('score').textContent = score;
+                ballSaveAvailable = true;
+                break;
+            case 'tax_avoidance':
+                score -= Math.floor(score * 0.25);
+                ballCount++;
+                document.getElementById('score').textContent = score;
+                document.getElementById('balls').textContent = ballCount;
+                break;
+            case 'all_in':
+                score = 0;
+                ballCount = 3;
+                document.getElementById('score').textContent = score;
+                document.getElementById('balls').textContent = ballCount;
+                break;
+        }
+        // Track modifier pick count
+        if (sessionInitials && playerStats) {
+            if (!playerStats.modPicks) playerStats.modPicks = {};
+            playerStats.modPicks[mod.id] = (playerStats.modPicks[mod.id] || 0) + 1;
+            savePlayerStats(sessionInitials, playerStats);
         }
     }
 
@@ -569,6 +629,7 @@
         extraBallSave3 = false;
         modifierChoiceLeft = null;
         modifierChoiceRight = null;
+        ballsLost = 0;
 
         const ball = objects[0];
         ball.x = SHOOTER_X;
@@ -600,6 +661,20 @@
     }
 
     function setupNewBall() {
+        // Safety: if modifier reduced ballCount to 0, go to game over
+        if (ballCount <= 0) {
+            finalScore = score;
+            isNewHighScore = checkHighScore(score);
+            gameState = STATE_GAME_OVER;
+            gameOverTimer = 90;
+            trackStat('gamesPlayed');
+            trackStat('totalScore', finalScore);
+            if (isNewHighScore && sessionInitials) {
+                addHighScore(sessionInitials, finalScore, maxTableLevel);
+                submitScoreToFirebase(sessionInitials, finalScore, maxTableLevel);
+            }
+            return;
+        }
         const ball = objects[0];
         ball.x = CENTER_X + DOME_RADIUS - BALL_RADIUS;
         ball.y = SHOOTER_Y - 20;
@@ -620,6 +695,10 @@
             ballSaveAvailable = true;
         }
         ballStartScore = score;
+        // Reset key states to prevent stuck flippers from menu selection
+        keys.z = false;
+        keys.x = false;
+        keys.c = false;
         gameState = STATE_PLAYING;
     }
 
@@ -764,18 +843,11 @@
     // === OVERLAY BUTTON HIT TEST ===
     function checkOverlayButtonHit(gameX, gameY) {
         if (gameState === STATE_WELCOME) {
-            // START button
-            const startBtnX = TABLE_WIDTH / 2 - 75;
-            const startBtnY = TABLE_HEIGHT / 2 + 90;
-            if (gameX >= startBtnX && gameX <= startBtnX + 150 && gameY >= startBtnY && gameY <= startBtnY + 50) {
-                return 'start';
-            }
-            // Letter boxes area - check for left/right scroll
             const boxW = 44;
             const boxGap = 12;
             const totalW = boxW * 3 + boxGap * 2;
             const startLetterX = (TABLE_WIDTH - totalW) / 2;
-            const boxY = TABLE_HEIGHT / 2 - 10;
+            const boxY = TABLE_HEIGHT / 2 - 40;
             const boxH = 52;
             // Up arrows
             if (gameY >= boxY - 25 && gameY <= boxY) {
@@ -787,11 +859,22 @@
                 const activeBoxX = startLetterX + currentInitialPos * (boxW + boxGap);
                 if (gameX >= activeBoxX && gameX <= activeBoxX + boxW) return 'scroll_down';
             }
-            // Confirm button (between boxes and start)
-            const cfmBtnX = TABLE_WIDTH / 2 - 55;
-            const cfmBtnY = boxY + boxH + 30;
-            if (gameX >= cfmBtnX && gameX <= cfmBtnX + 110 && gameY >= cfmBtnY && gameY <= cfmBtnY + 36) {
+            // BACK button
+            const backBtnX = TABLE_WIDTH / 2 - 80;
+            const btnRowY = boxY + boxH + 22;
+            if (gameX >= backBtnX && gameX <= backBtnX + 68 && gameY >= btnRowY && gameY <= btnRowY + 36) {
+                return 'back';
+            }
+            // CONFIRM button
+            const cfmBtnX = TABLE_WIDTH / 2 + 12;
+            if (gameX >= cfmBtnX && gameX <= cfmBtnX + 68 && gameY >= btnRowY && gameY <= btnRowY + 36) {
                 return 'confirm';
+            }
+            // START button
+            const startBtnY = btnRowY + 36 + 18;
+            const startBtnX = TABLE_WIDTH / 2 - 75;
+            if (gameX >= startBtnX && gameX <= startBtnX + 150 && gameY >= startBtnY && gameY <= startBtnY + 50) {
+                return 'start';
             }
         }
 
@@ -1015,6 +1098,7 @@
                     createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 30);
                 } else if (ballCount > 0) {
                     ballCount--;
+                    ballsLost++;
                     document.getElementById('balls').textContent = ballCount;
                     playSound('BallDrain');
 
@@ -1025,6 +1109,11 @@
                             document.getElementById('score').textContent = score;
                             allOrNothingActive = false;
                         }
+                        // Move ball off-screen to prevent re-triggering in substep loop
+                        ball.x = -100;
+                        ball.y = -100;
+                        ball.vx = 0;
+                        ball.vy = 0;
                         // Show modifier choice before next ball
                         generateModifierChoices();
                         gameState = STATE_CHOOSE_MODIFIER;
@@ -1321,12 +1410,15 @@
         }
 
         else if (gameState === STATE_CHOOSE_MODIFIER) {
-            if ((leftJust && !keys.x) || overlayTap === 'mod_left') {
-                applyModifier(modifierChoiceLeft);
-                setupNewBall();
-            } else if ((rightJust && !keys.z) || overlayTap === 'mod_right') {
-                applyModifier(modifierChoiceRight);
-                setupNewBall();
+            modifierScreenTimer++;
+            if (modifierScreenTimer > 30) {
+                if (leftJust || overlayTap === 'mod_left') {
+                    applyModifier(modifierChoiceLeft);
+                    setupNewBall();
+                } else if (rightJust || overlayTap === 'mod_right') {
+                    applyModifier(modifierChoiceRight);
+                    setupNewBall();
+                }
             }
         }
 
@@ -1363,14 +1455,14 @@
             // Initials entry
             ctx.fillStyle = '#888888';
             ctx.font = '14px Arial';
-            ctx.fillText('ENTER YOUR INITIALS', TABLE_WIDTH / 2, TABLE_HEIGHT / 2 - 42);
+            ctx.fillText('ENTER YOUR INITIALS', TABLE_WIDTH / 2, TABLE_HEIGHT / 2 - 60);
 
             const boxW = 44;
             const boxH = 52;
             const boxGap = 12;
             const totalW = boxW * 3 + boxGap * 2;
             const startX = (TABLE_WIDTH - totalW) / 2;
-            const boxY = TABLE_HEIGHT / 2 - 10;
+            const boxY = TABLE_HEIGHT / 2 - 40;
 
             for (let i = 0; i < 3; i++) {
                 const bx = startX + i * (boxW + boxGap);
@@ -1400,20 +1492,31 @@
                 }
             }
 
-            // CONFIRM letter button
-            const cfmBtnX = TABLE_WIDTH / 2 - 55;
-            const cfmBtnY = boxY + boxH + 30;
+            // BACK and CONFIRM buttons side by side
+            const btnRowY = boxY + boxH + 22;
+
+            // BACK button (left)
+            const backBtnX = TABLE_WIDTH / 2 - 80;
+            ctx.strokeStyle = '#ff8800';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(backBtnX, btnRowY, 68, 36);
+            ctx.fillStyle = '#ff8800';
+            ctx.font = 'bold 13px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('BACK', backBtnX + 34, btnRowY + 24);
+
+            // CONFIRM button (right)
+            const cfmBtnX = TABLE_WIDTH / 2 + 12;
             ctx.strokeStyle = '#00ff00';
             ctx.lineWidth = 2;
-            ctx.strokeRect(cfmBtnX, cfmBtnY, 110, 36);
+            ctx.strokeRect(cfmBtnX, btnRowY, 68, 36);
             ctx.fillStyle = '#00ff00';
-            ctx.font = 'bold 14px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('CONFIRM', TABLE_WIDTH / 2, cfmBtnY + 24);
+            ctx.font = 'bold 13px Arial';
+            ctx.fillText('CONFIRM', cfmBtnX + 34, btnRowY + 24);
 
             // START button
+            const startBtnY = btnRowY + 36 + 18;
             const startBtnX = TABLE_WIDTH / 2 - 75;
-            const startBtnY = TABLE_HEIGHT / 2 + 90;
             ctx.strokeStyle = '#ff00ff';
             ctx.lineWidth = 3;
             ctx.strokeRect(startBtnX, startBtnY, 150, 50);
@@ -1425,7 +1528,7 @@
             ctx.fillStyle = '#666666';
             ctx.font = '10px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('L/R: SCROLL   V/CONFIRM: NEXT LETTER   START: PLAY', TABLE_WIDTH / 2, startBtnY + 68);
+            ctx.fillText('L/R: SCROLL   V: NEXT   SPACE: BACK   START: PLAY', TABLE_WIDTH / 2, startBtnY + 68);
         }
 
         else if (gameState === STATE_GAME_OVER) {
@@ -1624,37 +1727,49 @@
             const leftBoxX = TABLE_WIDTH / 2 - boxW - 10;
             const rightBoxX = TABLE_WIDTH / 2 + 10;
 
+            const ready = modifierScreenTimer > 30;
+
             // Left box
-            ctx.strokeStyle = '#ff00ff';
+            ctx.strokeStyle = ready ? '#ff00ff' : '#553355';
             ctx.lineWidth = 2;
             ctx.strokeRect(leftBoxX, boxY, boxW, boxH);
             if (modifierChoiceLeft) {
-                ctx.fillStyle = '#ff00ff';
+                ctx.fillStyle = ready ? '#ff00ff' : '#553355';
                 ctx.font = 'bold 18px Arial';
                 ctx.fillText(modifierChoiceLeft.name, leftBoxX + boxW / 2, boxY + 50);
                 ctx.fillText(modifierChoiceLeft.name2, leftBoxX + boxW / 2, boxY + 75);
-                ctx.fillStyle = '#aaaaaa';
+                ctx.fillStyle = ready ? '#aaaaaa' : '#555555';
                 ctx.font = '11px Arial';
                 ctx.fillText(modifierChoiceLeft.desc, leftBoxX + boxW / 2, boxY + 110);
+                // Pick count
+                const leftPicks = (playerStats && playerStats.modPicks) ? (playerStats.modPicks[modifierChoiceLeft.id] || 0) : 0;
+                ctx.fillStyle = '#666666';
+                ctx.font = '10px Arial';
+                ctx.fillText('Picked ' + leftPicks + 'x', leftBoxX + boxW / 2, boxY + 145);
             }
 
             // Right box
-            ctx.strokeStyle = '#00ffff';
+            ctx.strokeStyle = ready ? '#00ffff' : '#335555';
             ctx.lineWidth = 2;
             ctx.strokeRect(rightBoxX, boxY, boxW, boxH);
             if (modifierChoiceRight) {
-                ctx.fillStyle = '#00ffff';
+                ctx.fillStyle = ready ? '#00ffff' : '#335555';
                 ctx.font = 'bold 18px Arial';
                 ctx.fillText(modifierChoiceRight.name, rightBoxX + boxW / 2, boxY + 50);
                 ctx.fillText(modifierChoiceRight.name2, rightBoxX + boxW / 2, boxY + 75);
-                ctx.fillStyle = '#aaaaaa';
+                ctx.fillStyle = ready ? '#aaaaaa' : '#555555';
                 ctx.font = '11px Arial';
                 ctx.fillText(modifierChoiceRight.desc, rightBoxX + boxW / 2, boxY + 110);
+                // Pick count
+                const rightPicks = (playerStats && playerStats.modPicks) ? (playerStats.modPicks[modifierChoiceRight.id] || 0) : 0;
+                ctx.fillStyle = '#666666';
+                ctx.font = '10px Arial';
+                ctx.fillText('Picked ' + rightPicks + 'x', rightBoxX + boxW / 2, boxY + 145);
             }
 
-            ctx.fillStyle = '#666666';
+            ctx.fillStyle = ready ? '#666666' : '#444444';
             ctx.font = '11px Arial';
-            ctx.fillText('LEFT / RIGHT to choose', TABLE_WIDTH / 2, TABLE_HEIGHT - 80);
+            ctx.fillText(ready ? 'LEFT / RIGHT to choose' : 'Get ready...', TABLE_WIDTH / 2, TABLE_HEIGHT - 80);
         }
 
         else if (gameState === STATE_STATS) {
