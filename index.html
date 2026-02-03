@@ -216,7 +216,7 @@
     }
 
     function playSound(name) {
-        if (!audioCtx || !soundBuffers[name]) return;
+        if (!audioCtx || !soundBuffers[name] || soundMuted) return;
         try {
             const source = audioCtx.createBufferSource();
             source.buffer = soundBuffers[name];
@@ -303,7 +303,9 @@
 
     let flipperLeft = 1;
     let flipperRight = 1;
-    let keys = { z: false, x: false, c: false, v: false };
+    let keys = { z: false, x: false, c: false, v: false, m: false };
+    let soundMuted = false;
+    try { soundMuted = localStorage.getItem('neonPinballMuted') === 'true'; } catch (e) {}
 
     let swipeStartY = 0;
     let isSwiping = false;
@@ -351,6 +353,7 @@
 
     // Session state
     let sessionInitials = null;
+    let playerStats = null;
 
     // === HIGH SCORE FUNCTIONS ===
     function loadHighScores() {
@@ -394,6 +397,35 @@
         try {
             localStorage.setItem('neonPinballInitials', JSON.stringify(chars));
         } catch (e) {}
+    }
+
+    // === PLAYER STATS ===
+    function defaultStats() {
+        return { allTargetsCleared: 0, colorBumperHits: 0, saucerCaptures: 0, extraBallsEarned: 0, maxMultiplier: 1, gamesPlayed: 0, totalScore: 0 };
+    }
+
+    function loadPlayerStats(initials) {
+        try {
+            const saved = localStorage.getItem('neonPinballStats_' + initials);
+            if (saved) return JSON.parse(saved);
+        } catch (e) {}
+        return defaultStats();
+    }
+
+    function savePlayerStats(initials, stats) {
+        try {
+            localStorage.setItem('neonPinballStats_' + initials, JSON.stringify(stats));
+        } catch (e) {}
+    }
+
+    function trackStat(key, value) {
+        if (!sessionInitials || !playerStats) return;
+        if (key === 'maxMultiplier') {
+            playerStats.maxMultiplier = Math.max(playerStats.maxMultiplier || 1, value);
+        } else {
+            playerStats[key] = (playerStats[key] || 0) + (value || 1);
+        }
+        savePlayerStats(sessionInitials, playerStats);
     }
 
     // === PARTICLES ===
@@ -660,6 +692,13 @@
                 if (gameX >= leftBX && gameX <= leftBX + mbW) return 'scores';
                 if (gameX >= rightBX && gameX <= rightBX + mbW) return 'play';
             }
+            // Change player button
+            const cpW = 160;
+            const cpX = TABLE_WIDTH / 2 - cpW / 2;
+            const cpY = mbY + mbH + 50;
+            if (gameX >= cpX && gameX <= cpX + cpW && gameY >= cpY && gameY <= cpY + 35) {
+                return 'change_player';
+            }
         }
 
         if (gameState === STATE_LEADERBOARD) {
@@ -783,6 +822,7 @@
                         if (spotTargets.every(s => s)) {
                             spotCompletions++;
                             scoreMultiplier *= 2;
+                            trackStat('maxMultiplier', scoreMultiplier);
                             spotTargets = [false, false, false, false];
                         }
                     }
@@ -800,6 +840,7 @@
                         if (laneLights.every(l => l)) {
                             ballCount++;
                             document.getElementById('balls').textContent = ballCount;
+                            trackStat('extraBallsEarned');
                             laneLights = [false, false, false, false];
                             extraBallTimer = 120;
                             createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 40);
@@ -860,6 +901,9 @@
                         ball.y = -100;
                         ball.vx = 0;
                         ball.vy = 0;
+                        // Track stats
+                        trackStat('gamesPlayed');
+                        trackStat('totalScore', finalScore);
                         // Auto-submit score with session initials
                         if (isNewHighScore && sessionInitials) {
                             addHighScore(sessionInitials, finalScore, maxTableLevel);
@@ -903,6 +947,7 @@
                             if (dropTargets.every(dt => !dt.active)) {
                                 score += (25 + targetLevel * 10) * scoreMultiplier;
                                 document.getElementById('score').textContent = score;
+                                trackStat('allTargetsCleared');
                                 setTimeout(() => { dropTargets.forEach(dt => { dt.active = true; }); }, 1500);
                             }
                             restitution = BUMPER_RESTITUTION;
@@ -913,6 +958,7 @@
                                 playRandomSound('SlingShot', 3);
                             } else {
                                 playRandomSound('PopBumper', 5);
+                                if (obj.isCenterBumper) trackStat('colorBumperHits');
                             }
                             if (obj.y < FLIPPER_Y - 80) {
                                 if (obj.isHighValue) { score += 5 * scoreMultiplier; }
@@ -949,6 +995,7 @@
                 if (sDist < SAUCER_RADIUS + BALL_RADIUS) {
                     if (speed < SAUCER_CAPTURE_SPEED) {
                         saucerActive = true;
+                        trackStat('saucerCaptures');
                         saucerTimer = SAUCER_HOLD_TIME;
                         saucerLevelUpDone = false;
                         ball.x = SAUCER_X;
@@ -1060,12 +1107,14 @@
                     // Quick start with current initials
                     sessionInitials = ALPHABET[initialsChars[0]] + ALPHABET[initialsChars[1]] + ALPHABET[initialsChars[2]];
                     saveSavedInitials([initialsChars[0], initialsChars[1], initialsChars[2]]);
+                    playerStats = loadPlayerStats(sessionInitials);
                     resetGame();
                 } else {
                     currentInitialPos++;
                     if (currentInitialPos >= 3) {
                         sessionInitials = ALPHABET[initialsChars[0]] + ALPHABET[initialsChars[1]] + ALPHABET[initialsChars[2]];
                         saveSavedInitials([initialsChars[0], initialsChars[1], initialsChars[2]]);
+                        playerStats = loadPlayerStats(sessionInitials);
                         resetGame();
                     }
                 }
@@ -1096,6 +1145,11 @@
                 loadOnlineScores(scores => { onlineScores = scores; });
             } else if ((rightJust && !keys.z) || vJust || overlayTap === 'play') {
                 resetGame();
+            } else if (overlayTap === 'change_player') {
+                sessionInitials = null;
+                playerStats = null;
+                currentInitialPos = 0;
+                gameState = STATE_WELCOME;
             }
         }
 
@@ -1279,6 +1333,18 @@
             ctx.font = '11px Arial';
             ctx.textAlign = 'center';
             ctx.fillText('LEFT: SCORES    RIGHT/V: PLAY AGAIN', TABLE_WIDTH / 2, btnY + btnH + 30);
+
+            // CHANGE PLAYER button
+            const cpBtnW = 160;
+            const cpBtnX = TABLE_WIDTH / 2 - cpBtnW / 2;
+            const cpBtnY = btnY + btnH + 50;
+            ctx.strokeStyle = '#ff8800';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(cpBtnX, cpBtnY, cpBtnW, 35);
+            ctx.fillStyle = '#ff8800';
+            ctx.font = 'bold 13px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('CHANGE PLAYER', TABLE_WIDTH / 2, cpBtnY + 23);
         }
 
         else if (gameState === STATE_LEADERBOARD) {
@@ -1476,6 +1542,19 @@
             drawCircle(ball.x, ball.y, ball.radius, '#ffffff');
         }
 
+        // Draw mute button during gameplay
+        if (gameState === STATE_PLAYING) {
+            const mbx = TABLE_WIDTH - 48;
+            const mby = 14;
+            ctx.strokeStyle = soundMuted ? '#ff4444' : '#444444';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(mbx, mby, 38, 20);
+            ctx.fillStyle = soundMuted ? '#ff4444' : '#888888';
+            ctx.font = 'bold 10px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(soundMuted ? 'MUTE' : 'SND', mbx + 19, mby + 14);
+        }
+
         // Draw level up text
         if (levelUpTimer > 0) {
             const luAlpha = Math.min(1, levelUpTimer / 20);
@@ -1594,6 +1673,10 @@
         if (e.code === 'ShiftRight' || e.key === 'x' || e.key === 'X') keys.x = true;
         if (e.code === 'Space' || e.key === 'c' || e.key === 'C') keys.c = true;
         if (e.key === 'v' || e.key === 'V') keys.v = true;
+        if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
+            soundMuted = !soundMuted;
+            try { localStorage.setItem('neonPinballMuted', soundMuted ? 'true' : 'false'); } catch (ex) {}
+        }
         if (e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') e.preventDefault();
     });
 
@@ -1627,6 +1710,17 @@
                     continue;
                 }
                 // Fallthrough for left/right scroll in welcome/menu states
+            }
+
+            // Check mute button during gameplay
+            if (gameState === STATE_PLAYING) {
+                const gameX = (x - offsetX) / scale;
+                const gameY = (y - offsetY) / scale;
+                if (gameX >= TABLE_WIDTH - 48 && gameX <= TABLE_WIDTH - 10 && gameY >= 14 && gameY <= 34) {
+                    soundMuted = !soundMuted;
+                    try { localStorage.setItem('neonPinballMuted', soundMuted ? 'true' : 'false'); } catch (ex) {}
+                    continue;
+                }
             }
 
             if (x < width * 0.5) {
@@ -1697,6 +1791,15 @@
             if (e.button === 0) {
                 if (x < width * 0.5) { keys.z = true; } else { keys.x = true; }
             }
+            return;
+        }
+
+        // Check mute button
+        const gameX = (x - offsetX) / scale;
+        const gameY = (y - offsetY) / scale;
+        if (gameX >= TABLE_WIDTH - 48 && gameX <= TABLE_WIDTH - 10 && gameY >= 14 && gameY <= 34) {
+            soundMuted = !soundMuted;
+            try { localStorage.setItem('neonPinballMuted', soundMuted ? 'true' : 'false'); } catch (ex) {}
             return;
         }
 
