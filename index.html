@@ -366,6 +366,7 @@
     let modifierChoiceRight = null;
     let modifierScreenTimer = 0;
     let ballsLost = 0;
+    let safetyPinActive = false;
 
     // === HIGH SCORE FUNCTIONS ===
     function loadHighScores() {
@@ -457,7 +458,8 @@
         { id: 'pay_up', name: 'PAY UP', name2: '-5000', desc: 'Pay 5000 for an extra ball', condition: () => score > 5000 },
         { id: 'income_tax', name: 'INCOME', name2: 'TAX', desc: 'Pay 25% score for ball save', condition: () => score > 1000 },
         { id: 'tax_avoidance', name: 'TAX', name2: 'AVOIDANCE', desc: 'Pay 25% score for extra ball', condition: () => score > 5000 },
-        { id: 'all_in', name: 'ALL IN', name2: '', desc: 'Pay 100% score, back to 3 balls', condition: () => score > 5000 }
+        { id: 'all_in', name: 'ALL IN', name2: '', desc: 'Pay 100% score, back to 3 balls', condition: () => score > 5000 },
+        { id: 'safety_pin', name: 'SAFETY', name2: 'PIN', desc: 'Center pin gets bigger for 1 ball', condition: () => score < 1000 }
     ];
 
     function generateModifierChoices() {
@@ -563,6 +565,12 @@
                 document.getElementById('score').textContent = score;
                 document.getElementById('balls').textContent = ballCount;
                 break;
+            case 'safety_pin':
+                safetyPinActive = true;
+                for (const o of objects) {
+                    if (o.isCenterBumper) { o.radius = 24; break; }
+                }
+                break;
         }
         // Track modifier pick count
         if (sessionInitials && playerStats) {
@@ -630,6 +638,10 @@
         modifierChoiceLeft = null;
         modifierChoiceRight = null;
         ballsLost = 0;
+        safetyPinActive = false;
+        for (const obj of objects) {
+            if (obj.isCenterBumper) { obj.radius = 12; break; }
+        }
 
         const ball = objects[0];
         ball.x = SHOOTER_X;
@@ -693,6 +705,13 @@
         // Extra ball save on last ball (ball 3 modifier)
         if (extraBallSave3 && ballCount === 1) {
             ballSaveAvailable = true;
+        }
+        // Reset Safety Pin modifier (only lasts 1 ball)
+        if (safetyPinActive) {
+            safetyPinActive = false;
+            for (const obj of objects) {
+                if (obj.isCenterBumper) { obj.radius = 12; break; }
+            }
         }
         ballStartScore = score;
         // Reset key states to prevent stuck flippers from menu selection
@@ -1015,7 +1034,7 @@
             ball.y += ball.vy;
             ball.vy += GRAVITY;
 
-            const inLaneZone = Math.abs(ball.y - TOP_LANE_Y) < BALL_RADIUS + 5;
+            const inLaneZone = Math.abs(ball.y - TOP_LANE_Y) < BALL_RADIUS + 15;
             if (inLaneZone && !ballInTopLane) {
                 ballInTopLane = true;
                 for (let g = 0; g < 3; g++) {
@@ -1192,17 +1211,18 @@
                                 if (obj.isCenterBumper) trackStat('colorBumperHits');
                             }
                             if (obj.y < FLIPPER_Y - 80) {
-                                if (obj.isHighValue) { score += 5 * scoreMultiplier * targetValueMultiplier; }
-                                else { score += scoreMultiplier * targetValueMultiplier; }
+                                if (obj.isHighValue) { score += 15 * scoreMultiplier * targetValueMultiplier; }
+                                else { score += 3 * scoreMultiplier * targetValueMultiplier; }
                                 document.getElementById('score').textContent = score;
                             }
                             restitution = BUMPER_RESTITUTION;
                         } else {
                             restitution = RESTITUTION;
-                            // Wall sound with cooldown
-                            if (!obj.isShooter && i > FLIPPER_SEGMENTS * 2 && audioCtx) {
+                            // Wall sound with cooldown - only on hard impacts
+                            const impactSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+                            if (!obj.isShooter && i > FLIPPER_SEGMENTS * 2 && audioCtx && impactSpeed > 2) {
                                 const now = audioCtx.currentTime;
-                                if (now - lastWallSoundTime > 0.08) {
+                                if (now - lastWallSoundTime > 0.25) {
                                     lastWallSoundTime = now;
                                     playRandomSound('Wall', 3);
                                 }
@@ -1896,10 +1916,10 @@
         }
 
         // Draw lights, saucer, etc.
-        const topLaneLightY = TOP_LANE_Y - 12;
+        const topLaneLightY = TOP_LANE_Y;
         for (let i = 0; i < 3; i++) {
             const lx = (TOP_LANE_PINS[i] + TOP_LANE_PINS[i + 1]) / 2;
-            drawCircle(lx, topLaneLightY, 5, topLaneLights[i] ? '#ffff00' : '#333333');
+            drawCircle(lx, topLaneLightY, 10, topLaneLights[i] ? '#ffff00' : '#333333');
         }
 
         for (let i = 0; i < 4; i++) {
@@ -1994,9 +2014,9 @@
             const ebAlpha = Math.min(1, extraBallTimer / 20);
             ctx.save();
             ctx.globalAlpha = ebAlpha;
-            ctx.shadowColor = '#ff00ff';
+            ctx.shadowColor = '#00ffff';
             ctx.shadowBlur = 15;
-            ctx.fillStyle = '#ff00ff';
+            ctx.fillStyle = '#00ffff';
             ctx.font = 'bold 28px Arial';
             ctx.textAlign = 'center';
             ctx.fillText('EXTRA BALL!', TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
@@ -2088,6 +2108,23 @@
         if (e.code === 'ShiftRight' || e.key === 'x' || e.key === 'X') keys.x = false;
         if (e.code === 'Space' || e.key === 'c' || e.key === 'C') keys.c = false;
         if (e.key === 'v' || e.key === 'V') keys.v = false;
+    });
+
+    // Reset all keys when window loses focus (prevents stuck flippers)
+    window.addEventListener('blur', () => {
+        keys.z = false;
+        keys.x = false;
+        keys.c = false;
+        keys.v = false;
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            keys.z = false;
+            keys.x = false;
+            keys.c = false;
+            keys.v = false;
+        }
     });
 
     // === TOUCH CONTROLS ===
