@@ -296,8 +296,8 @@
     const SPINNER_Y = 145;
     const SPINNER_RADIUS = 12;
 
-    // Scoop position (right side)
-    const SCOOP_X = 320;
+    // Scoop position (right side - moved left to avoid shooter lane)
+    const SCOOP_X = 280;
     const SCOOP_Y = 350;
     const SCOOP_RADIUS = 15;
 
@@ -313,7 +313,7 @@
         {x: 50, y: 420}, {x: 50, y: 450}, {x: 50, y: 480}
     ];
     const STANDUP_RIGHT_POSITIONS = [
-        {x: 330, y: 420}, {x: 330, y: 450}, {x: 330, y: 480}
+        {x: 290, y: 420}, {x: 290, y: 450}, {x: 290, y: 480}
     ];
 
     const LANE_LIGHT_Y = FLIPPER_Y - 35;
@@ -417,6 +417,7 @@
     // Table 2 specific elements
     let rampDropTargetActive = true;  // Drop target blocking the ramp
     let spinnerAngle = 0;
+    let spinnerSpeed = 0;  // Degrees per frame for continuous spin
     let spinnerHits = 0;
     let spinnerActive = false;  // Whether spinner just activated (triggers drop target reset)
 
@@ -643,7 +644,7 @@
             case 'safety_pin':
                 safetyPinActive = true;
                 for (const o of objects) {
-                    if (o.isCenterBumper) { o.radius = 24; break; }
+                    if (o.isCenterPin) { o.radius = 18; break; }  // Bigger center pin below flippers
                 }
                 break;
         }
@@ -721,6 +722,7 @@
         tableTransitionTimer = 0;
         rampDropTargetActive = true;
         spinnerAngle = 0;
+        spinnerSpeed = 0;
         spinnerHits = 0;
         spinnerActive = false;
         scoopBallLocked = false;
@@ -736,7 +738,7 @@
         buildTable();
 
         for (const obj of objects) {
-            if (obj.isCenterBumper) { obj.radius = 12; break; }
+            if (obj.isCenterPin) { obj.radius = 5; break; }
         }
 
         const ball = objects[0];
@@ -806,7 +808,7 @@
         if (safetyPinActive) {
             safetyPinActive = false;
             for (const obj of objects) {
-                if (obj.isCenterBumper) { obj.radius = 12; break; }
+                if (obj.isCenterPin) { obj.radius = 5; break; }
             }
         }
         ballStartScore = score;
@@ -850,10 +852,13 @@
 
         const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
 
+        // Center pin below flippers (drain blocker for Safety Pin modifier)
+        const centerPin = createObject(FLIPPER_CENTER, FLIPPER_Y + 25, TYPE_WALL, 5);
+        centerPin.isCenterPin = true;
+        centerPin.color = '#ffff00';
+
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
-
-            createObject(FLIPPER_CENTER, FLIPPER_Y + 55);
 
             for (let i = 0; i < 90; i++) {
                 createObject(CENTER_X + dir * DOME_BOTH, TABLE_HEIGHT - 7 * i);
@@ -996,11 +1001,14 @@
 
         const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
 
+        // Center pin below flippers (drain blocker for Safety Pin modifier)
+        const centerPin = createObject(FLIPPER_CENTER, FLIPPER_Y + 25, TYPE_WALL, safetyPinActive ? 18 : 5);
+        centerPin.isCenterPin = true;
+        centerPin.color = '#ffff00';
+
         // Create walls, outlanes, and slingshots (same structure as table 1)
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
-
-            createObject(FLIPPER_CENTER, FLIPPER_Y + 55);
 
             // Side walls
             for (let i = 0; i < 90; i++) {
@@ -1175,8 +1183,14 @@
         // Add some guide rails near standup targets
         for (let i = 0; i < 5; i++) {
             createObject(65, 410 + i * 20, TYPE_WALL, 3);
-            createObject(315, 410 + i * 20, TYPE_WALL, 3);
+            createObject(275, 410 + i * 20, TYPE_WALL, 3);
         }
+
+        // Small pop bumpers above outlanes (same as Table 1)
+        const smallBumperLeft = createObject(FLIPPER_CENTER - 130, 470, TYPE_BUMPER, 12);
+        smallBumperLeft.color = '#ff8800';
+        const smallBumperRight = createObject(FLIPPER_CENTER + 130, 470, TYPE_BUMPER, 12);
+        smallBumperRight.color = '#ff8800';
 
         // Lane lights area (same positions as table 1)
         // These are handled in rendering, not as objects
@@ -1190,6 +1204,8 @@
 
         // Reset table 2 specific states
         rampDropTargetActive = true;
+        spinnerAngle = 0;
+        spinnerSpeed = 0;
         spinnerHits = 0;
         spinnerActive = false;
         scoopBallLocked = false;
@@ -1625,7 +1641,9 @@
                         if (currentTable === 2 && obj.isSpinner && !obj.bounce) {
                             obj.bounce = 5;
                             spinnerHits++;
-                            spinnerAngle += 30;  // Spin the spinner
+                            // Add spin speed based on ball velocity for realistic spinning
+                            const ballSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+                            spinnerSpeed += ballSpeed * 10;  // Harder hit = more spins
                             score += 5 * scoreMultiplier * targetValueMultiplier;
                             document.getElementById('score').textContent = score;
                             playRandomSound('SlingShot', 3);
@@ -1867,10 +1885,17 @@
 
         // Table 2 specific updates
         if (currentTable === 2) {
-            // Gradually slow down spinner
-            if (spinnerAngle > 0) {
-                spinnerAngle *= 0.98;
-                if (spinnerAngle < 1) spinnerAngle = 0;
+            // Update spinner rotation continuously
+            if (spinnerSpeed > 0.5) {
+                spinnerAngle += spinnerSpeed;  // Continuous rotation
+                spinnerSpeed *= 0.97;  // Friction decay
+                // Award points for each rotation
+                if (Math.floor((spinnerAngle - spinnerSpeed) / 360) < Math.floor(spinnerAngle / 360)) {
+                    score += 5 * scoreMultiplier * targetValueMultiplier;
+                    document.getElementById('score').textContent = score;
+                }
+            } else {
+                spinnerSpeed = 0;
             }
         }
 
@@ -2531,28 +2556,46 @@
             ctx.textAlign = 'center';
             ctx.fillText('RAMP', 55, 250);
 
-            // Draw spinner
+            // Draw spinner - realistic coin-flip style
             if (table2Spinner) {
+                const spinnerWidth = 30;  // Width of lane the spinner spans
+                const spinnerHeight = 20; // Height of the spinning piece
+
+                // Calculate the apparent width based on spin angle (coin flip effect)
+                // As it spins, the width goes from full to thin to full (like viewing a coin edge-on)
+                const spinPhase = (spinnerAngle * Math.PI) / 180;
+                const apparentWidth = Math.abs(Math.cos(spinPhase)) * spinnerHeight;
+
                 ctx.save();
                 ctx.translate(SPINNER_X, SPINNER_Y);
-                ctx.rotate((spinnerAngle * Math.PI) / 180);
 
-                // Spinner blades
-                ctx.strokeStyle = '#00ff88';
-                ctx.lineWidth = 3;
-                for (let i = 0; i < 4; i++) {
-                    ctx.beginPath();
-                    ctx.moveTo(0, 0);
-                    const angle = (i * Math.PI / 2);
-                    ctx.lineTo(Math.cos(angle) * SPINNER_RADIUS, Math.sin(angle) * SPINNER_RADIUS);
-                    ctx.stroke();
+                // Draw the thin axle line that the spinner rotates on
+                ctx.strokeStyle = '#005533';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(-spinnerWidth / 2, 0);
+                ctx.lineTo(spinnerWidth / 2, 0);
+                ctx.stroke();
+
+                // Draw the spinning rectangle piece
+                // Width fluctuates to simulate the coin-flip perspective
+                const rectWidth = Math.max(2, apparentWidth);
+                const gradient = ctx.createLinearGradient(-rectWidth / 2, 0, rectWidth / 2, 0);
+                gradient.addColorStop(0, '#00aa66');
+                gradient.addColorStop(0.5, '#00ff88');
+                gradient.addColorStop(1, '#00aa66');
+                ctx.fillStyle = gradient;
+
+                // Draw rectangle centered on the axle
+                ctx.fillRect(-rectWidth / 2, -spinnerWidth / 2, rectWidth, spinnerWidth);
+
+                // Add edge highlights when nearly edge-on
+                if (apparentWidth < 8) {
+                    ctx.strokeStyle = '#88ffcc';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(-rectWidth / 2, -spinnerWidth / 2, rectWidth, spinnerWidth);
                 }
 
-                // Center hub
-                ctx.fillStyle = '#00aa66';
-                ctx.beginPath();
-                ctx.arc(0, 0, 4, 0, Math.PI * 2);
-                ctx.fill();
                 ctx.restore();
 
                 // Spinner label
@@ -2605,8 +2648,8 @@
             ctx.fillText('+' + (standupBankLeftCompletions + 1) + 'X', 50, 495);
 
             ctx.fillStyle = standupBankRight.every(t => t) ? '#00ff00' : '#006600';
-            ctx.fillText('MULT', 330, 405);
-            ctx.fillText('+' + (standupBankRightCompletions + 1) + 'X', 330, 495);
+            ctx.fillText('MULT', 290, 405);
+            ctx.fillText('+' + (standupBankRightCompletions + 1) + 'X', 290, 495);
 
             // Multiball ready indicator
             if (multiballReady) {
@@ -2815,6 +2858,10 @@
         if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
             soundMuted = !soundMuted;
             try { localStorage.setItem('neonPinballMuted', soundMuted ? 'true' : 'false'); } catch (ex) {}
+        }
+        // Secret hotkey "2" to instantly switch to Table 2 for testing
+        if (e.key === '2' && !e.repeat && gameState === STATE_PLAYING && currentTable === 1) {
+            transitionToTable2();
         }
         if (e.code === 'Space') e.preventDefault();
     });
