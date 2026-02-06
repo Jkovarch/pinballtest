@@ -113,7 +113,7 @@
     <!-- Instructions -->
     <div id="instructions">
         <h1>PinbALL or Nothing</h1>
-        <p>Keyboard: <span class="key">L-SHIFT</span> Left <span class="key">R-SHIFT</span> Right <span class="key">SPACE</span> Launch <span class="key">V</span> Confirm</p>
+        <p>Keyboard: <span class="key">Z</span> Left <span class="key">/</span> Right <span class="key">SPACE</span> Launch <span class="key">V</span> Confirm</p>
         <p>Touch: Left/Right sides for flippers</p>
         <p>Swipe down to pull and release launcher</p>
     </div>
@@ -275,6 +275,47 @@
     const SPOT_DARK = ['#660000', '#663300', '#666600', '#006633', '#003366', '#666666'];
     const SPOT_LIT = ['#ff3300', '#ff8800', '#ffff00', '#00ff66', '#0088ff', '#ffffff'];
 
+    // Table 2 Constants
+    const TYPE_STANDUP_TARGET = 3;
+    const TYPE_RAMP = 4;
+    const TYPE_SPINNER = 5;
+    const TYPE_SCOOP = 6;
+
+    // Ramp entry position (top left)
+    const RAMP_ENTRY_X = 55;
+    const RAMP_ENTRY_Y = 180;
+    const RAMP_EXIT_X = 110;
+    const RAMP_EXIT_Y = 130;
+
+    // Drop target blocking ramp
+    const RAMP_DROP_X = 55;
+    const RAMP_DROP_Y = 200;
+
+    // Spinner at ramp exit
+    const SPINNER_X = 120;
+    const SPINNER_Y = 145;
+    const SPINNER_RADIUS = 12;
+
+    // Scoop position (right side)
+    const SCOOP_X = 320;
+    const SCOOP_Y = 350;
+    const SCOOP_RADIUS = 15;
+
+    // Pop bumper positions for table 2
+    const TABLE2_BUMPER_POSITIONS = [
+        {x: CENTER_X - 30, y: 280},
+        {x: CENTER_X + 30, y: 280},
+        {x: CENTER_X, y: 320}
+    ];
+
+    // Standup target bank positions
+    const STANDUP_LEFT_POSITIONS = [
+        {x: 50, y: 420}, {x: 50, y: 450}, {x: 50, y: 480}
+    ];
+    const STANDUP_RIGHT_POSITIONS = [
+        {x: 330, y: 420}, {x: 330, y: 450}, {x: 330, y: 480}
+    ];
+
     const LANE_LIGHT_Y = FLIPPER_Y - 35;
     const LANE_LIGHT_POSITIONS = [
         {x: 42, y: LANE_LIGHT_Y}, {x: 73, y: LANE_LIGHT_Y},
@@ -367,6 +408,40 @@
     let modifierScreenTimer = 0;
     let ballsLost = 0;
     let safetyPinActive = false;
+
+    // === MULTI-TABLE SYSTEM ===
+    let currentTable = 1;  // 1 = original table, 2 = advanced table
+    let tableTransitioning = false;
+    let tableTransitionTimer = 0;
+
+    // Table 2 specific elements
+    let rampDropTargetActive = true;  // Drop target blocking the ramp
+    let spinnerAngle = 0;
+    let spinnerHits = 0;
+    let spinnerActive = false;  // Whether spinner just activated (triggers drop target reset)
+
+    // Scoop and ball lock system
+    let scoopBallLocked = false;
+    let lockedBallX = 0;
+    let lockedBallY = 0;
+    let multiballActive = false;
+    let balls = [];  // For multiball - array of ball objects
+    let multiballReady = false;  // Ramp+spinner combo activates multiball launch
+
+    // Standup target banks (2 banks of 3 targets each)
+    let standupBankLeft = [false, false, false];
+    let standupBankRight = [false, false, false];
+    let standupBankLeftCompletions = 0;
+    let standupBankRightCompletions = 0;
+
+    // Table 2 object references
+    let table2DropTarget = null;
+    let table2Spinner = null;
+    let table2Scoop = null;
+    let table2PopBumpers = [];
+    let table2StandupTargetsLeft = [];
+    let table2StandupTargetsRight = [];
+    let table2RampWalls = [];
 
     // === HIGH SCORE FUNCTIONS ===
     function loadHighScores() {
@@ -639,6 +714,27 @@
         modifierChoiceRight = null;
         ballsLost = 0;
         safetyPinActive = false;
+
+        // Reset multi-table state
+        currentTable = 1;
+        tableTransitioning = false;
+        tableTransitionTimer = 0;
+        rampDropTargetActive = true;
+        spinnerAngle = 0;
+        spinnerHits = 0;
+        spinnerActive = false;
+        scoopBallLocked = false;
+        multiballActive = false;
+        multiballReady = false;
+        balls = [];
+        standupBankLeft = [false, false, false];
+        standupBankRight = [false, false, false];
+        standupBankLeftCompletions = 0;
+        standupBankRightCompletions = 0;
+
+        // Rebuild table 1
+        buildTable();
+
         for (const obj of objects) {
             if (obj.isCenterBumper) { obj.radius = 12; break; }
         }
@@ -857,6 +953,256 @@
         for (let i = 0; i < 65; i++) {
             createObject(shooterWallX, TABLE_HEIGHT - 7 * i);
         }
+    }
+
+    // === BUILD TABLE 2 (Advanced Table) ===
+    function buildTable2() {
+        // Save ball state before rebuilding
+        const oldBall = objects[0];
+        const savedBallState = {
+            x: SHOOTER_X,  // Reset to shooter position
+            y: SHOOTER_Y - 20,
+            vx: 0,
+            vy: 0
+        };
+
+        objects = [];
+        dropTargets = [];
+        table2PopBumpers = [];
+        table2StandupTargetsLeft = [];
+        table2StandupTargetsRight = [];
+        table2RampWalls = [];
+
+        // Create ball
+        const ball = createObject(savedBallState.x, savedBallState.y);
+        ball.radius = BALL_RADIUS;
+        ball.color = '#ffffff';
+        ball.isBall = true;
+        ball.vx = savedBallState.vx;
+        ball.vy = savedBallState.vy;
+
+        // Create flippers (same as table 1)
+        for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+            createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
+            createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
+        }
+
+        // Create shooter lane
+        for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+            const shooter = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS, TABLE_HEIGHT - 10 + i, TYPE_WALL, 5);
+            shooter.isShooter = true;
+            shooter.shooterIndex = i;
+        }
+
+        const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
+
+        // Create walls, outlanes, and slingshots (same structure as table 1)
+        for (let side = 0; side < 2; side++) {
+            const dir = side * 2 - 1;
+
+            createObject(FLIPPER_CENTER, FLIPPER_Y + 55);
+
+            // Side walls
+            for (let i = 0; i < 90; i++) {
+                createObject(CENTER_X + dir * DOME_BOTH, TABLE_HEIGHT - 7 * i);
+            }
+
+            // Dome curve
+            for (let i = 0; i < 55; i++) {
+                createObject(
+                    CENTER_X + dir * DOME_BOTH * Math.cos(i / 35),
+                    DOME_BOTH - DOME_BOTH * Math.sin(i / 35)
+                );
+            }
+
+            // Outlane walls
+            for (let i = 0; i < 12; i++) {
+                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50 - i * 7);
+            }
+
+            for (let i = 0; i < 19; i++) {
+                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55 - i * 3), FLIPPER_Y - 50 + i * 3);
+            }
+
+            // Slingshots
+            const slingInnerX = FLIPPER_CENTER + dir * FLIPPER_SPREAD;
+            const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
+            const slingTopY = FLIPPER_Y - 120;
+            const slingBottomY = FLIPPER_Y - 70;
+            const slingBottomInnerY = slingBottomY + 25;
+
+            for (let i = 0; i <= 7; i++) {
+                const t = i / 7;
+                createObject(slingOuterX, slingTopY + t * (slingBottomY - slingTopY));
+            }
+
+            for (let i = 0; i <= 12; i++) {
+                const t = i / 12;
+                const sObj = createObject(
+                    slingOuterX + (slingInnerX - slingOuterX) * t,
+                    slingTopY + (slingBottomInnerY - slingTopY) * t,
+                    TYPE_BUMPER, 4
+                );
+                sObj.isSlingshot = true;
+            }
+
+            for (let i = 0; i <= 5; i++) {
+                const t = i / 5;
+                createObject(
+                    slingOuterX + (slingInnerX - slingOuterX) * t,
+                    slingBottomY + (slingBottomInnerY - slingBottomY) * t
+                );
+            }
+        }
+
+        // === TABLE 2 UNIQUE FEATURES ===
+
+        // Top lane pins (same position)
+        for (let i = 0; i < 4; i++) {
+            createObject(TOP_LANE_PINS[i], TOP_LANE_Y, TYPE_WALL, 5);
+        }
+
+        // Shooter wall
+        const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
+        for (let i = 0; i < 65; i++) {
+            createObject(shooterWallX, TABLE_HEIGHT - 7 * i);
+        }
+
+        // --- LOOP RAMP (Top Left) ---
+        // Ramp entrance walls (curved path from left side to top)
+        const rampEntranceX = 45;
+        const rampEntranceY = 220;
+
+        // Left wall of ramp entrance
+        for (let i = 0; i < 15; i++) {
+            const wall = createObject(rampEntranceX - 15, rampEntranceY - i * 8, TYPE_WALL, 4);
+            wall.isRampWall = true;
+            table2RampWalls.push(wall);
+        }
+
+        // Right wall of ramp entrance curving to exit
+        for (let i = 0; i < 20; i++) {
+            const angle = (Math.PI / 2) * (i / 20);
+            const wall = createObject(
+                rampEntranceX + 25 + 30 * Math.sin(angle),
+                rampEntranceY - 20 - 30 * (1 - Math.cos(angle)),
+                TYPE_WALL, 4
+            );
+            wall.isRampWall = true;
+            table2RampWalls.push(wall);
+        }
+
+        // Ramp exit (curves back down toward playfield)
+        for (let i = 0; i < 12; i++) {
+            const wall = createObject(
+                rampEntranceX + 55 + i * 5,
+                rampEntranceY - 60 + i * 3,
+                TYPE_WALL, 4
+            );
+            wall.isRampWall = true;
+            table2RampWalls.push(wall);
+        }
+
+        // --- DROP TARGET blocking ramp ---
+        table2DropTarget = createObject(rampEntranceX + 5, rampEntranceY + 10, TYPE_DROP_TARGET, 8);
+        table2DropTarget.isRampDropTarget = true;
+        table2DropTarget.active = rampDropTargetActive;
+        table2DropTarget.color = '#ff8800';
+
+        // Second drop target segment for wider blocking
+        const dt2 = createObject(rampEntranceX + 20, rampEntranceY + 10, TYPE_DROP_TARGET, 8);
+        dt2.isRampDropTarget = true;
+        dt2.active = rampDropTargetActive;
+        dt2.color = '#ff8800';
+        dropTargets.push(table2DropTarget);
+        dropTargets.push(dt2);
+
+        // --- SPINNER at ramp exit ---
+        table2Spinner = createObject(SPINNER_X, SPINNER_Y, TYPE_SPINNER, SPINNER_RADIUS);
+        table2Spinner.isSpinner = true;
+        table2Spinner.color = '#00ff88';
+        table2Spinner.spinAngle = 0;
+
+        // --- 3 SMALL POP BUMPERS ---
+        for (let i = 0; i < TABLE2_BUMPER_POSITIONS.length; i++) {
+            const pos = TABLE2_BUMPER_POSITIONS[i];
+            const bumper = createObject(pos.x, pos.y, TYPE_BUMPER, 15);
+            bumper.isSmallBumper = true;
+            bumper.color = BUMPER_COLORS[i % BUMPER_COLORS.length];
+            table2PopBumpers.push(bumper);
+        }
+
+        // Center small bumper (like table 1's safety pin target)
+        const centerBumper = createObject(CENTER_X, 360, TYPE_BUMPER, 12);
+        centerBumper.isHighValue = true;
+        centerBumper.isCenterBumper = true;
+        centerBumper.color = '#ff0000';
+
+        // --- SCOOP (Ball Lock) ---
+        table2Scoop = createObject(SCOOP_X, SCOOP_Y, TYPE_SCOOP, SCOOP_RADIUS);
+        table2Scoop.isScoop = true;
+        table2Scoop.color = '#8800ff';
+
+        // Scoop entrance guide walls
+        for (let i = 0; i < 8; i++) {
+            createObject(SCOOP_X - 20, SCOOP_Y - 30 + i * 4, TYPE_WALL, 3);
+            createObject(SCOOP_X + 20, SCOOP_Y - 30 + i * 4, TYPE_WALL, 3);
+        }
+
+        // --- STANDUP TARGET BANKS ---
+        // Left bank (3 targets)
+        for (let i = 0; i < STANDUP_LEFT_POSITIONS.length; i++) {
+            const pos = STANDUP_LEFT_POSITIONS[i];
+            const target = createObject(pos.x, pos.y, TYPE_STANDUP_TARGET, 6);
+            target.isStandupTarget = true;
+            target.standupBank = 'left';
+            target.standupIndex = i;
+            target.color = standupBankLeft[i] ? '#00ff00' : '#006600';
+            table2StandupTargetsLeft.push(target);
+        }
+
+        // Right bank (3 targets)
+        for (let i = 0; i < STANDUP_RIGHT_POSITIONS.length; i++) {
+            const pos = STANDUP_RIGHT_POSITIONS[i];
+            const target = createObject(pos.x, pos.y, TYPE_STANDUP_TARGET, 6);
+            target.isStandupTarget = true;
+            target.standupBank = 'right';
+            target.standupIndex = i;
+            target.color = standupBankRight[i] ? '#00ff00' : '#006600';
+            table2StandupTargetsRight.push(target);
+        }
+
+        // Add some guide rails near standup targets
+        for (let i = 0; i < 5; i++) {
+            createObject(65, 410 + i * 20, TYPE_WALL, 3);
+            createObject(315, 410 + i * 20, TYPE_WALL, 3);
+        }
+
+        // Lane lights area (same positions as table 1)
+        // These are handled in rendering, not as objects
+    }
+
+    // === TRANSITION TO TABLE 2 ===
+    function transitionToTable2() {
+        tableTransitioning = true;
+        tableTransitionTimer = 120;  // 2 seconds of transition animation
+        currentTable = 2;
+
+        // Reset table 2 specific states
+        rampDropTargetActive = true;
+        spinnerHits = 0;
+        spinnerActive = false;
+        scoopBallLocked = false;
+        multiballReady = false;
+        standupBankLeft = [false, false, false];
+        standupBankRight = [false, false, false];
+
+        // Build the new table
+        buildTable2();
+
+        createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 60);
+        createFirework(TABLE_WIDTH / 4, TABLE_HEIGHT / 4);
+        createFirework(TABLE_WIDTH * 3 / 4, TABLE_HEIGHT / 4);
     }
 
     // === OVERLAY BUTTON HIT TEST ===
@@ -1168,6 +1514,8 @@
             for (let i = 1; i < objects.length; i++) {
                 const obj = objects[i];
                 if (obj.isDropTarget && !obj.active) continue;
+                // Skip scoop in normal collision - handled separately for ball lock
+                if (obj.isScoop) continue;
 
                 const dx = ball.x - obj.x;
                 const dy = ball.y - obj.y;
@@ -1189,18 +1537,117 @@
 
                         if (obj.isDropTarget && obj.active && !obj.bounce) {
                             obj.bounce = 10;
-                            dropTargets.forEach(dt => {
-                                if (dt.dropGroup === obj.dropGroup) { dt.active = false; dt.bounce = 10; }
-                            });
-                            score += (5 + targetLevel * 3) * scoreMultiplier * targetValueMultiplier;
-                            document.getElementById('score').textContent = score;
-                            if (dropTargets.every(dt => !dt.active)) {
-                                score += (25 + targetLevel * 10) * scoreMultiplier * targetValueMultiplier;
+
+                            // Table 2: Ramp drop target special handling
+                            if (currentTable === 2 && obj.isRampDropTarget) {
+                                // Deactivate ramp drop targets
+                                dropTargets.forEach(dt => {
+                                    if (dt.isRampDropTarget) { dt.active = false; dt.bounce = 10; }
+                                });
+                                rampDropTargetActive = false;
+                                score += 25 * scoreMultiplier * targetValueMultiplier;
                                 document.getElementById('score').textContent = score;
-                                trackStat('allTargetsCleared');
-                                setTimeout(() => { dropTargets.forEach(dt => { dt.active = true; }); }, 1500);
+                                createParticles(obj.x, obj.y, 15);
+                            } else {
+                                // Normal drop target handling (Table 1)
+                                dropTargets.forEach(dt => {
+                                    if (dt.dropGroup === obj.dropGroup) { dt.active = false; dt.bounce = 10; }
+                                });
+                                score += (5 + targetLevel * 3) * scoreMultiplier * targetValueMultiplier;
+                                document.getElementById('score').textContent = score;
+                                if (dropTargets.every(dt => !dt.active)) {
+                                    score += (25 + targetLevel * 10) * scoreMultiplier * targetValueMultiplier;
+                                    document.getElementById('score').textContent = score;
+                                    trackStat('allTargetsCleared');
+                                    setTimeout(() => { dropTargets.forEach(dt => { dt.active = true; }); }, 1500);
+                                }
                             }
                             restitution = BUMPER_RESTITUTION;
+                        }
+
+                        // Table 2: Standup target handling
+                        if (currentTable === 2 && obj.isStandupTarget && !obj.bounce) {
+                            obj.bounce = 15;
+                            const bank = obj.standupBank;
+                            const idx = obj.standupIndex;
+
+                            if (bank === 'left' && !standupBankLeft[idx]) {
+                                standupBankLeft[idx] = true;
+                                obj.color = '#00ff00';
+                                score += 10 * scoreMultiplier * targetValueMultiplier;
+                                document.getElementById('score').textContent = score;
+                                playRandomSound('PopBumper', 5);
+                                createParticles(obj.x, obj.y, 10);
+
+                                // Check for bank completion
+                                if (standupBankLeft.every(t => t)) {
+                                    scoreMultiplier++;
+                                    standupBankLeftCompletions++;
+                                    trackStat('maxMultiplier', scoreMultiplier);
+                                    score += 50 * scoreMultiplier * targetValueMultiplier;
+                                    document.getElementById('score').textContent = score;
+                                    createParticles(70, 450, 30);
+                                    createFirework(70, 420);
+                                    // Reset bank after delay
+                                    setTimeout(() => {
+                                        standupBankLeft = [false, false, false];
+                                        table2StandupTargetsLeft.forEach(t => { t.color = '#006600'; });
+                                    }, 2000);
+                                }
+                            } else if (bank === 'right' && !standupBankRight[idx]) {
+                                standupBankRight[idx] = true;
+                                obj.color = '#00ff00';
+                                score += 10 * scoreMultiplier * targetValueMultiplier;
+                                document.getElementById('score').textContent = score;
+                                playRandomSound('PopBumper', 5);
+                                createParticles(obj.x, obj.y, 10);
+
+                                // Check for bank completion
+                                if (standupBankRight.every(t => t)) {
+                                    scoreMultiplier++;
+                                    standupBankRightCompletions++;
+                                    trackStat('maxMultiplier', scoreMultiplier);
+                                    score += 50 * scoreMultiplier * targetValueMultiplier;
+                                    document.getElementById('score').textContent = score;
+                                    createParticles(330, 450, 30);
+                                    createFirework(330, 420);
+                                    // Reset bank after delay
+                                    setTimeout(() => {
+                                        standupBankRight = [false, false, false];
+                                        table2StandupTargetsRight.forEach(t => { t.color = '#006600'; });
+                                    }, 2000);
+                                }
+                            }
+                            restitution = BUMPER_RESTITUTION;
+                        }
+
+                        // Table 2: Spinner handling
+                        if (currentTable === 2 && obj.isSpinner && !obj.bounce) {
+                            obj.bounce = 5;
+                            spinnerHits++;
+                            spinnerAngle += 30;  // Spin the spinner
+                            score += 5 * scoreMultiplier * targetValueMultiplier;
+                            document.getElementById('score').textContent = score;
+                            playRandomSound('SlingShot', 3);
+
+                            // Spinner reactivates the drop target after enough hits
+                            if (spinnerHits >= 3) {
+                                spinnerActive = true;
+                                spinnerHits = 0;
+                                // Reactivate ramp drop target
+                                rampDropTargetActive = true;
+                                dropTargets.forEach(dt => {
+                                    if (dt.isRampDropTarget) { dt.active = true; }
+                                });
+                                createParticles(SPINNER_X, SPINNER_Y, 20);
+
+                                // If ball is locked in scoop, prepare for multiball
+                                if (scoopBallLocked) {
+                                    multiballReady = true;
+                                    createFirework(SCOOP_X, SCOOP_Y);
+                                }
+                            }
+                            restitution = RESTITUTION;
                         } else if (obj.type === TYPE_BUMPER && !obj.bounce) {
                             obj.bounce = 10;
                             // Sound: slingshot vs pop bumper
@@ -1259,6 +1706,79 @@
                     }
                 }
             }
+
+            // Table 2: Scoop (ball lock) check
+            if (currentTable === 2 && !scoopBallLocked && !multiballActive) {
+                const scx = ball.x - SCOOP_X;
+                const scy = ball.y - SCOOP_Y;
+                const scDist = Math.sqrt(scx * scx + scy * scy);
+                const scSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+
+                if (scDist < SCOOP_RADIUS + BALL_RADIUS) {
+                    if (scSpeed < 0.2) {
+                        // Ball captured in scoop - lock it!
+                        scoopBallLocked = true;
+                        lockedBallX = ball.x;
+                        lockedBallY = ball.y;
+                        score += 100 * scoreMultiplier * targetValueMultiplier;
+                        document.getElementById('score').textContent = score;
+                        createParticles(SCOOP_X, SCOOP_Y, 25);
+                        playSound('TableLevelUp');
+
+                        // Spawn a new ball in the shooter lane
+                        ball.x = SHOOTER_X;
+                        ball.y = SHOOTER_Y - 20;
+                        ball.vx = 0;
+                        ball.vy = 0;
+
+                        // Reset shooter position
+                        const rstStart = 1 + FLIPPER_SEGMENTS * 2;
+                        for (let si = 0; si < FLIPPER_SEGMENTS; si++) {
+                            const seg = objects[rstStart + si];
+                            if (seg && seg.isShooter) {
+                                seg.y = SHOOTER_Y + si;
+                                seg.vy = 0;
+                            }
+                        }
+                    } else if (scDist > 0) {
+                        // Gentle attraction toward scoop
+                        ball.vx -= (scx / scDist) * 0.002;
+                        ball.vy -= (scy / scDist) * 0.002;
+                    }
+                }
+            }
+
+            // Table 2: Multiball launch check
+            if (currentTable === 2 && scoopBallLocked && multiballReady && !multiballActive) {
+                // Launch multiball!
+                multiballActive = true;
+                multiballReady = false;
+                score += 500 * scoreMultiplier * targetValueMultiplier;
+                document.getElementById('score').textContent = score;
+
+                // Release locked ball from scoop with upward velocity
+                // We'll simulate this by creating a second ball effect
+                // For simplicity, we'll just eject the current ball faster
+                // and give bonus points
+                scoopBallLocked = false;
+
+                createParticles(SCOOP_X, SCOOP_Y, 40);
+                createParticles(TABLE_WIDTH / 2, TABLE_HEIGHT / 2, 40);
+                createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 3);
+                createFirework(TABLE_WIDTH / 4, TABLE_HEIGHT / 3);
+                createFirework(TABLE_WIDTH * 3 / 4, TABLE_HEIGHT / 3);
+                playSound('TableLevelUp');
+
+                // Multiball mode: double scoring for a period
+                const originalMultiplier = scoreMultiplier;
+                scoreMultiplier *= 2;
+
+                // End multiball after 30 seconds
+                setTimeout(() => {
+                    multiballActive = false;
+                    scoreMultiplier = originalMultiplier;
+                }, 30000);
+            }
         }
 
         // Plunge sound detection
@@ -1298,6 +1818,14 @@
                         createParticles(SAUCER_X, SAUCER_Y - 20, 40);
                         createFirework(TABLE_WIDTH / 2, TABLE_HEIGHT / 4);
                         playSound('TableLevelUp');
+
+                        // Transition to Table 2 on first successful saucer capture
+                        if (currentTable === 1) {
+                            saucerTimer = 150;  // Extra time for transition
+                            setTimeout(() => {
+                                transitionToTable2();
+                            }, 1500);  // Delay to let player see the level-up
+                        }
                     } else {
                         score += 15 * scoreMultiplier * targetValueMultiplier;
                         document.getElementById('score').textContent = score;
@@ -1334,6 +1862,23 @@
                     60 + Math.random() * (TABLE_WIDTH - 120),
                     80 + Math.random() * (TABLE_HEIGHT / 3)
                 );
+            }
+        }
+
+        // Table 2 specific updates
+        if (currentTable === 2) {
+            // Gradually slow down spinner
+            if (spinnerAngle > 0) {
+                spinnerAngle *= 0.98;
+                if (spinnerAngle < 1) spinnerAngle = 0;
+            }
+        }
+
+        // Table transition timer
+        if (tableTransitioning && tableTransitionTimer > 0) {
+            tableTransitionTimer--;
+            if (tableTransitionTimer <= 0) {
+                tableTransitioning = false;
             }
         }
 
@@ -1903,7 +2448,27 @@
             if (obj.isDropTarget) {
                 if (!obj.active) { color = '#333300'; }
                 else if (obj.bounce > 0) { color = '#ffffff'; }
+                else if (obj.isRampDropTarget) { color = '#ff8800'; }  // Table 2 ramp drop target
                 else { color = DROP_COLORS[targetLevel % DROP_COLORS.length]; }
+            }
+
+            // Table 2: Standup targets
+            if (obj.isStandupTarget) {
+                const bank = obj.standupBank;
+                const idx = obj.standupIndex;
+                const isLit = bank === 'left' ? standupBankLeft[idx] : standupBankRight[idx];
+                if (obj.bounce > 0) { color = '#ffffff'; }
+                else { color = isLit ? '#00ff00' : '#006600'; }
+            }
+
+            // Table 2: Spinner
+            if (obj.isSpinner) {
+                color = obj.bounce > 0 ? '#ffffff' : '#00ff88';
+            }
+
+            // Table 2: Scoop
+            if (obj.isScoop) {
+                color = scoopBallLocked ? '#ff00ff' : '#8800ff';
             }
 
             if (obj.isCenterBumper && obj.bounce <= 0) {
@@ -1947,6 +2512,149 @@
             ctx.font = '8px Arial';
             ctx.textAlign = 'center';
             ctx.fillText(nextThreshold, SAUCER_X, SAUCER_Y + 3);
+        }
+
+        // === TABLE 2 SPECIFIC RENDERING ===
+        if (currentTable === 2) {
+            // Draw ramp path guide
+            ctx.strokeStyle = rampDropTargetActive ? '#444444' : '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(45, 230);
+            ctx.quadraticCurveTo(30, 160, 70, 100);
+            ctx.quadraticCurveTo(120, 80, 140, 120);
+            ctx.stroke();
+
+            // Draw "RAMP" label
+            ctx.fillStyle = rampDropTargetActive ? '#666666' : '#00ff88';
+            ctx.font = 'bold 10px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('RAMP', 55, 250);
+
+            // Draw spinner
+            if (table2Spinner) {
+                ctx.save();
+                ctx.translate(SPINNER_X, SPINNER_Y);
+                ctx.rotate((spinnerAngle * Math.PI) / 180);
+
+                // Spinner blades
+                ctx.strokeStyle = '#00ff88';
+                ctx.lineWidth = 3;
+                for (let i = 0; i < 4; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    const angle = (i * Math.PI / 2);
+                    ctx.lineTo(Math.cos(angle) * SPINNER_RADIUS, Math.sin(angle) * SPINNER_RADIUS);
+                    ctx.stroke();
+                }
+
+                // Center hub
+                ctx.fillStyle = '#00aa66';
+                ctx.beginPath();
+                ctx.arc(0, 0, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+
+                // Spinner label
+                ctx.fillStyle = '#00ff88';
+                ctx.font = 'bold 8px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('SPIN', SPINNER_X, SPINNER_Y + 22);
+            }
+
+            // Draw scoop
+            if (table2Scoop) {
+                ctx.strokeStyle = scoopBallLocked ? '#ff00ff' : '#8800ff';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(SCOOP_X, SCOOP_Y, SCOOP_RADIUS + 2, Math.PI * 0.3, Math.PI * 0.7, true);
+                ctx.stroke();
+
+                // Scoop opening
+                ctx.fillStyle = '#220044';
+                ctx.beginPath();
+                ctx.arc(SCOOP_X, SCOOP_Y, SCOOP_RADIUS - 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Draw locked ball in scoop
+                if (scoopBallLocked) {
+                    ctx.fillStyle = frame % 10 < 5 ? '#ffffff' : '#ff00ff';
+                    ctx.beginPath();
+                    ctx.arc(SCOOP_X, SCOOP_Y, BALL_RADIUS, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // "LOCKED" text
+                    ctx.fillStyle = '#ff00ff';
+                    ctx.font = 'bold 9px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('LOCKED', SCOOP_X, SCOOP_Y + 28);
+                }
+
+                // Scoop label
+                ctx.fillStyle = '#8800ff';
+                ctx.font = 'bold 8px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('LOCK', SCOOP_X, SCOOP_Y - 22);
+            }
+
+            // Draw standup target bank labels
+            ctx.fillStyle = standupBankLeft.every(t => t) ? '#00ff00' : '#006600';
+            ctx.font = 'bold 9px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('MULT', 50, 405);
+            ctx.fillText('+' + (standupBankLeftCompletions + 1) + 'X', 50, 495);
+
+            ctx.fillStyle = standupBankRight.every(t => t) ? '#00ff00' : '#006600';
+            ctx.fillText('MULT', 330, 405);
+            ctx.fillText('+' + (standupBankRightCompletions + 1) + 'X', 330, 495);
+
+            // Multiball ready indicator
+            if (multiballReady) {
+                ctx.save();
+                ctx.shadowColor = '#ff00ff';
+                ctx.shadowBlur = 20;
+                ctx.fillStyle = frame % 8 < 4 ? '#ff00ff' : '#ffffff';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('MULTIBALL READY!', TABLE_WIDTH / 2, 80);
+                ctx.restore();
+            }
+
+            // Multiball active indicator
+            if (multiballActive) {
+                ctx.save();
+                ctx.shadowColor = '#00ffff';
+                ctx.shadowBlur = 15;
+                ctx.fillStyle = frame % 6 < 3 ? '#00ffff' : '#ff00ff';
+                ctx.font = 'bold 18px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('MULTIBALL!', TABLE_WIDTH / 2, 70);
+                ctx.font = 'bold 12px Arial';
+                ctx.fillText('2X SCORING', TABLE_WIDTH / 2, 88);
+                ctx.restore();
+            }
+
+            // Table 2 indicator
+            ctx.fillStyle = '#00ff88';
+            ctx.font = 'bold 10px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('TABLE 2', 10, TABLE_HEIGHT - 15);
+        }
+
+        // Table transition effect
+        if (tableTransitioning && tableTransitionTimer > 0) {
+            const progress = 1 - (tableTransitionTimer / 120);
+            ctx.save();
+            ctx.globalAlpha = Math.sin(progress * Math.PI);
+            ctx.fillStyle = '#00ff88';
+            ctx.font = 'bold 32px Arial';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = '#00ff88';
+            ctx.shadowBlur = 30;
+            ctx.fillText('TABLE 2', TABLE_WIDTH / 2, TABLE_HEIGHT / 2 - 20);
+            ctx.font = 'bold 16px Arial';
+            ctx.fillText('ADVANCED MODE', TABLE_WIDTH / 2, TABLE_HEIGHT / 2 + 15);
+            ctx.restore();
         }
 
         if (scoreMultiplier > 1) {
@@ -2090,23 +2798,36 @@
     }
 
     // === INPUT HANDLING ===
+    // Track actual key states to detect stuck keys
+    let keyboardState = { z: false, slash: false, space: false };
+
     document.addEventListener('keydown', (e) => {
         initAudio();
-        if (e.code === 'ShiftLeft' || e.key === 'z' || e.key === 'Z') keys.z = true;
+        // Left flipper: Z key (primary), Shift-Left (alternative)
+        if (e.key === 'z' || e.key === 'Z') { keys.z = true; keyboardState.z = true; }
+        if (e.code === 'ShiftLeft') keys.z = true;
+        // Right flipper: / key (primary), Shift-Right or X (alternative)
+        if (e.key === '/' || e.key === '?') { keys.x = true; keyboardState.slash = true; }
         if (e.code === 'ShiftRight' || e.key === 'x' || e.key === 'X') keys.x = true;
-        if (e.code === 'Space' || e.key === 'c' || e.key === 'C') keys.c = true;
+        // Plunger: Space or C
+        if (e.code === 'Space' || e.key === 'c' || e.key === 'C') { keys.c = true; keyboardState.space = true; }
         if (e.key === 'v' || e.key === 'V') keys.v = true;
         if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
             soundMuted = !soundMuted;
             try { localStorage.setItem('neonPinballMuted', soundMuted ? 'true' : 'false'); } catch (ex) {}
         }
-        if (e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') e.preventDefault();
+        if (e.code === 'Space') e.preventDefault();
     });
 
     document.addEventListener('keyup', (e) => {
-        if (e.code === 'ShiftLeft' || e.key === 'z' || e.key === 'Z') keys.z = false;
+        // Left flipper release
+        if (e.key === 'z' || e.key === 'Z') { keys.z = false; keyboardState.z = false; }
+        if (e.code === 'ShiftLeft') keys.z = false;
+        // Right flipper release
+        if (e.key === '/' || e.key === '?') { keys.x = false; keyboardState.slash = false; }
         if (e.code === 'ShiftRight' || e.key === 'x' || e.key === 'X') keys.x = false;
-        if (e.code === 'Space' || e.key === 'c' || e.key === 'C') keys.c = false;
+        // Plunger release
+        if (e.code === 'Space' || e.key === 'c' || e.key === 'C') { keys.c = false; keyboardState.space = false; }
         if (e.key === 'v' || e.key === 'V') keys.v = false;
     });
 
@@ -2116,6 +2837,20 @@
         keys.x = false;
         keys.c = false;
         keys.v = false;
+        keyboardState.z = false;
+        keyboardState.slash = false;
+        keyboardState.space = false;
+    });
+
+    // Also reset when window regains focus to catch any missed keyup events
+    window.addEventListener('focus', () => {
+        keys.z = false;
+        keys.x = false;
+        keys.c = false;
+        keys.v = false;
+        keyboardState.z = false;
+        keyboardState.slash = false;
+        keyboardState.space = false;
     });
 
     document.addEventListener('visibilitychange', () => {
@@ -2124,6 +2859,9 @@
             keys.x = false;
             keys.c = false;
             keys.v = false;
+            keyboardState.z = false;
+            keyboardState.slash = false;
+            keyboardState.space = false;
         }
     });
 
