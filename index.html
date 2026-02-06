@@ -302,9 +302,10 @@
     const SCOOP_RADIUS = 15;
 
     // Pop bumper positions for table 2
+    // Moved lower bumpers outward to prevent ball getting stuck between them
     const TABLE2_BUMPER_POSITIONS = [
-        {x: CENTER_X - 30, y: 280},
-        {x: CENTER_X + 30, y: 280},
+        {x: CENTER_X - 50, y: 280},
+        {x: CENTER_X + 50, y: 280},
         {x: CENTER_X, y: 320}
     ];
 
@@ -644,7 +645,11 @@
             case 'safety_pin':
                 safetyPinActive = true;
                 for (const o of objects) {
-                    if (o.isCenterPin) { o.radius = 18; break; }  // Bigger center pin below flippers
+                    if (o.isCenterPin) {
+                        o.radius = 18;  // Bigger center pin below flippers
+                        o.color = '#ffff00';  // Yellow to show active
+                        break;
+                    }
                 }
                 break;
         }
@@ -738,7 +743,11 @@
         buildTable();
 
         for (const obj of objects) {
-            if (obj.isCenterPin) { obj.radius = 5; break; }
+            if (obj.isCenterPin) {
+                obj.radius = safetyPinActive ? 18 : 5;
+                obj.color = safetyPinActive ? '#ffff00' : '#00ffff';
+                break;
+            }
         }
 
         const ball = objects[0];
@@ -808,7 +817,11 @@
         if (safetyPinActive) {
             safetyPinActive = false;
             for (const obj of objects) {
-                if (obj.isCenterPin) { obj.radius = 5; break; }
+                if (obj.isCenterPin) {
+                    obj.radius = 5;  // Back to normal size
+                    obj.color = '#00ffff';  // Back to cyan
+                    break;
+                }
             }
         }
         ballStartScore = score;
@@ -853,9 +866,9 @@
         const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
 
         // Center pin below flippers (drain blocker for Safety Pin modifier)
-        const centerPin = createObject(FLIPPER_CENTER, FLIPPER_Y + 25, TYPE_WALL, 5);
+        const centerPin = createObject(FLIPPER_CENTER, FLIPPER_Y + 25, TYPE_WALL, safetyPinActive ? 18 : 5);
         centerPin.isCenterPin = true;
-        centerPin.color = '#ffff00';
+        centerPin.color = safetyPinActive ? '#ffff00' : '#00ffff';  // Yellow when active, cyan when normal
 
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
@@ -1004,7 +1017,7 @@
         // Center pin below flippers (drain blocker for Safety Pin modifier)
         const centerPin = createObject(FLIPPER_CENTER, FLIPPER_Y + 25, TYPE_WALL, safetyPinActive ? 18 : 5);
         centerPin.isCenterPin = true;
-        centerPin.color = '#ffff00';
+        centerPin.color = safetyPinActive ? '#ffff00' : '#00ffff';  // Yellow when active, cyan when normal
 
         // Create walls, outlanes, and slingshots (same structure as table 1)
         for (let side = 0; side < 2; side++) {
@@ -1112,18 +1125,24 @@
         }
 
         // --- DROP TARGET blocking ramp ---
-        table2DropTarget = createObject(rampEntranceX + 5, rampEntranceY + 10, TYPE_DROP_TARGET, 8);
+        // Made smaller (radius 5) to prevent ball getting stuck behind
+        table2DropTarget = createObject(rampEntranceX + 5, rampEntranceY + 10, TYPE_DROP_TARGET, 5);
         table2DropTarget.isRampDropTarget = true;
         table2DropTarget.active = rampDropTargetActive;
         table2DropTarget.color = '#ff8800';
 
         // Second drop target segment for wider blocking
-        const dt2 = createObject(rampEntranceX + 20, rampEntranceY + 10, TYPE_DROP_TARGET, 8);
+        const dt2 = createObject(rampEntranceX + 18, rampEntranceY + 10, TYPE_DROP_TARGET, 5);
         dt2.isRampDropTarget = true;
         dt2.active = rampDropTargetActive;
         dt2.color = '#ff8800';
         dropTargets.push(table2DropTarget);
         dropTargets.push(dt2);
+
+        // Back wall behind drop targets to prevent ball getting stuck
+        for (let i = 0; i < 5; i++) {
+            createObject(rampEntranceX - 5, rampEntranceY + 5 + i * 5, TYPE_WALL, 3);
+        }
 
         // --- SPINNER at ramp exit ---
         table2Spinner = createObject(SPINNER_X, SPINNER_Y, TYPE_SPINNER, SPINNER_RADIUS);
@@ -1532,6 +1551,8 @@
                 if (obj.isDropTarget && !obj.active) continue;
                 // Skip scoop in normal collision - handled separately for ball lock
                 if (obj.isScoop) continue;
+                // Skip standup targets for now - disabled for testing
+                if (obj.isStandupTarget) continue;
 
                 const dx = ball.x - obj.x;
                 const dy = ball.y - obj.y;
