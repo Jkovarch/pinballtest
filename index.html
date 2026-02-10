@@ -302,9 +302,10 @@
     const SCOOP_RADIUS = 15;
 
     // Pop bumper positions for table 2
+    // Moved lower bumpers outward to prevent ball getting stuck between them
     const TABLE2_BUMPER_POSITIONS = [
-        {x: CENTER_X - 30, y: 280},
-        {x: CENTER_X + 30, y: 280},
+        {x: CENTER_X - 50, y: 280},
+        {x: CENTER_X + 50, y: 280},
         {x: CENTER_X, y: 320}
     ];
 
@@ -644,7 +645,11 @@
             case 'safety_pin':
                 safetyPinActive = true;
                 for (const o of objects) {
-                    if (o.isCenterPin) { o.radius = 18; break; }  // Bigger center pin below flippers
+                    if (o.isCenterPin) {
+                        o.radius = 18;  // Bigger center pin below flippers
+                        o.color = '#ffff00';  // Yellow to show active
+                        break;
+                    }
                 }
                 break;
         }
@@ -738,7 +743,11 @@
         buildTable();
 
         for (const obj of objects) {
-            if (obj.isCenterPin) { obj.radius = 5; break; }
+            if (obj.isCenterPin) {
+                obj.radius = safetyPinActive ? 18 : 5;
+                obj.color = safetyPinActive ? '#ffff00' : '#00ffff';
+                break;
+            }
         }
 
         const ball = objects[0];
@@ -808,7 +817,11 @@
         if (safetyPinActive) {
             safetyPinActive = false;
             for (const obj of objects) {
-                if (obj.isCenterPin) { obj.radius = 5; break; }
+                if (obj.isCenterPin) {
+                    obj.radius = 5;  // Back to normal size
+                    obj.color = '#00ffff';  // Back to cyan
+                    break;
+                }
             }
         }
         ballStartScore = score;
@@ -853,9 +866,9 @@
         const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
 
         // Center pin below flippers (drain blocker for Safety Pin modifier)
-        const centerPin = createObject(FLIPPER_CENTER, FLIPPER_Y + 25, TYPE_WALL, 5);
+        const centerPin = createObject(FLIPPER_CENTER, FLIPPER_Y + 25, TYPE_WALL, safetyPinActive ? 18 : 5);
         centerPin.isCenterPin = true;
-        centerPin.color = '#ffff00';
+        centerPin.color = safetyPinActive ? '#ffff00' : '#00ffff';  // Yellow when active, cyan when normal
 
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
@@ -1004,7 +1017,7 @@
         // Center pin below flippers (drain blocker for Safety Pin modifier)
         const centerPin = createObject(FLIPPER_CENTER, FLIPPER_Y + 25, TYPE_WALL, safetyPinActive ? 18 : 5);
         centerPin.isCenterPin = true;
-        centerPin.color = '#ffff00';
+        centerPin.color = safetyPinActive ? '#ffff00' : '#00ffff';  // Yellow when active, cyan when normal
 
         // Create walls, outlanes, and slingshots (same structure as table 1)
         for (let side = 0; side < 2; side++) {
@@ -1112,18 +1125,24 @@
         }
 
         // --- DROP TARGET blocking ramp ---
-        table2DropTarget = createObject(rampEntranceX + 5, rampEntranceY + 10, TYPE_DROP_TARGET, 8);
+        // Made smaller (radius 5) to prevent ball getting stuck behind
+        table2DropTarget = createObject(rampEntranceX + 5, rampEntranceY + 10, TYPE_DROP_TARGET, 5);
         table2DropTarget.isRampDropTarget = true;
         table2DropTarget.active = rampDropTargetActive;
         table2DropTarget.color = '#ff8800';
 
         // Second drop target segment for wider blocking
-        const dt2 = createObject(rampEntranceX + 20, rampEntranceY + 10, TYPE_DROP_TARGET, 8);
+        const dt2 = createObject(rampEntranceX + 18, rampEntranceY + 10, TYPE_DROP_TARGET, 5);
         dt2.isRampDropTarget = true;
         dt2.active = rampDropTargetActive;
         dt2.color = '#ff8800';
         dropTargets.push(table2DropTarget);
         dropTargets.push(dt2);
+
+        // Back wall behind drop targets to prevent ball getting stuck
+        for (let i = 0; i < 5; i++) {
+            createObject(rampEntranceX - 5, rampEntranceY + 5 + i * 5, TYPE_WALL, 3);
+        }
 
         // --- SPINNER at ramp exit ---
         table2Spinner = createObject(SPINNER_X, SPINNER_Y, TYPE_SPINNER, SPINNER_RADIUS);
@@ -1532,6 +1551,8 @@
                 if (obj.isDropTarget && !obj.active) continue;
                 // Skip scoop in normal collision - handled separately for ball lock
                 if (obj.isScoop) continue;
+                // Skip standup targets for now - disabled for testing
+                if (obj.isStandupTarget) continue;
 
                 const dx = ball.x - obj.x;
                 const dy = ball.y - obj.y;
@@ -2420,6 +2441,514 @@
     }
 
     // === DRAWING ===
+    // === ENHANCED VISUAL RENDERING SYSTEM ===
+    let gridOffset = 0;  // For animated grid
+
+    // Draw glowing animated grid background
+    function drawAnimatedGrid() {
+        const gridSize = 25;
+        const time = frame * 0.02;
+        gridOffset = (gridOffset + 0.3) % gridSize;
+
+        // Draw vertical lines with pulse effect
+        for (let x = 0; x <= TABLE_WIDTH; x += gridSize) {
+            const pulsePhase = (x / TABLE_WIDTH + time) % 1;
+            const brightness = 0.03 + 0.02 * Math.sin(pulsePhase * Math.PI * 2);
+
+            ctx.strokeStyle = `rgba(0, 255, 255, ${brightness})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, TABLE_HEIGHT);
+            ctx.stroke();
+        }
+
+        // Draw horizontal lines with upward-moving glow
+        for (let y = 0; y <= TABLE_HEIGHT; y += gridSize) {
+            const adjustedY = (y + gridOffset) % TABLE_HEIGHT;
+            const pulsePos = 1 - (adjustedY / TABLE_HEIGHT);
+            const glowIntensity = 0.03 + 0.04 * Math.pow(Math.sin(pulsePos * Math.PI), 2);
+
+            ctx.strokeStyle = `rgba(0, 255, 255, ${glowIntensity})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(TABLE_WIDTH, y);
+            ctx.stroke();
+        }
+
+        // Add traveling light waves going upward
+        const waveCount = 3;
+        for (let w = 0; w < waveCount; w++) {
+            const waveY = TABLE_HEIGHT - ((frame * 1.5 + w * (TABLE_HEIGHT / waveCount)) % TABLE_HEIGHT);
+            const waveAlpha = 0.15 * (1 - Math.abs(waveY - TABLE_HEIGHT/2) / (TABLE_HEIGHT/2));
+
+            if (waveAlpha > 0.01) {
+                const gradient = ctx.createLinearGradient(0, waveY - 20, 0, waveY + 20);
+                gradient.addColorStop(0, 'rgba(0, 255, 255, 0)');
+                gradient.addColorStop(0.5, `rgba(0, 255, 255, ${waveAlpha})`);
+                gradient.addColorStop(1, 'rgba(0, 255, 255, 0)');
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, waveY - 20, TABLE_WIDTH, 40);
+            }
+        }
+    }
+
+    // Draw a bumper with 3D depth, glow, and reflections
+    function drawBumper3D(x, y, radius, color, isActive) {
+        const bounceScale = isActive ? 1.15 : 1;
+        const r = radius * bounceScale;
+
+        // Outer glow
+        ctx.save();
+        const glowRadius = r * 1.8;
+        const glow = ctx.createRadialGradient(x, y, r * 0.5, x, y, glowRadius);
+        glow.addColorStop(0, color + '40');
+        glow.addColorStop(0.5, color + '15');
+        glow.addColorStop(1, 'transparent');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Shadow underneath
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.beginPath();
+        ctx.ellipse(x + 3, y + 4, r * 0.9, r * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Main body with gradient
+        const bodyGrad = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r);
+        bodyGrad.addColorStop(0, lightenColor(color, 60));
+        bodyGrad.addColorStop(0.4, color);
+        bodyGrad.addColorStop(1, darkenColor(color, 40));
+
+        ctx.fillStyle = bodyGrad;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Outer ring
+        ctx.strokeStyle = darkenColor(color, 30);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, r - 1, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Inner circle (cap)
+        const capGrad = ctx.createRadialGradient(x - r * 0.2, y - r * 0.2, 0, x, y, r * 0.6);
+        capGrad.addColorStop(0, '#ffffff');
+        capGrad.addColorStop(0.3, lightenColor(color, 40));
+        capGrad.addColorStop(1, color);
+
+        ctx.fillStyle = capGrad;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Top highlight reflection
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.beginPath();
+        ctx.ellipse(x - r * 0.25, y - r * 0.35, r * 0.35, r * 0.2, -0.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Small specular highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.beginPath();
+        ctx.arc(x - r * 0.3, y - r * 0.4, r * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Draw smooth walls instead of circle chains
+    function drawSmoothWalls() {
+        const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
+
+        // Helper to draw a wall segment with glow
+        function drawWallPath(path, color, lineWidth, glowColor) {
+            // Shadow
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.lineWidth = lineWidth + 4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.translate(2, 3);
+            ctx.stroke(path);
+            ctx.restore();
+
+            // Glow
+            ctx.save();
+            ctx.shadowColor = glowColor || color;
+            ctx.shadowBlur = 8;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.stroke(path);
+            ctx.restore();
+
+            // Main line
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.stroke(path);
+
+            // Highlight
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = lineWidth * 0.3;
+            ctx.translate(-1, -1);
+            ctx.stroke(path);
+            ctx.restore();
+        }
+
+        // Left side wall
+        let path = new Path2D();
+        path.moveTo(CENTER_X - DOME_BOTH, TABLE_HEIGHT);
+        path.lineTo(CENTER_X - DOME_BOTH, TABLE_HEIGHT - 90 * 7);
+        drawWallPath(path, '#00dddd', 10, '#00ffff');
+
+        // Right side wall
+        path = new Path2D();
+        path.moveTo(CENTER_X + DOME_BOTH, TABLE_HEIGHT);
+        path.lineTo(CENTER_X + DOME_BOTH, TABLE_HEIGHT - 90 * 7);
+        drawWallPath(path, '#00dddd', 10, '#00ffff');
+
+        // Top dome (left curve)
+        path = new Path2D();
+        for (let i = 0; i <= 55; i++) {
+            const x = CENTER_X - DOME_BOTH * Math.cos(i / 35);
+            const y = DOME_BOTH - DOME_BOTH * Math.sin(i / 35);
+            if (i === 0) path.moveTo(x, y);
+            else path.lineTo(x, y);
+        }
+        drawWallPath(path, '#00dddd', 10, '#00ffff');
+
+        // Top dome (right curve)
+        path = new Path2D();
+        for (let i = 0; i <= 55; i++) {
+            const x = CENTER_X + DOME_BOTH * Math.cos(i / 35);
+            const y = DOME_BOTH - DOME_BOTH * Math.sin(i / 35);
+            if (i === 0) path.moveTo(x, y);
+            else path.lineTo(x, y);
+        }
+        drawWallPath(path, '#00dddd', 10, '#00ffff');
+
+        // Shooter lane wall
+        const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
+        path = new Path2D();
+        path.moveTo(shooterWallX, TABLE_HEIGHT);
+        path.lineTo(shooterWallX, TABLE_HEIGHT - 65 * 7);
+        drawWallPath(path, '#00aa88', 8, '#00ffaa');
+
+        // Outlane walls (both sides)
+        for (let side = 0; side < 2; side++) {
+            const dir = side * 2 - 1;
+
+            // Vertical outlane guide
+            path = new Path2D();
+            path.moveTo(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50);
+            path.lineTo(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50 - 11 * 7);
+            drawWallPath(path, '#ff6600', 8, '#ff8800');
+
+            // Diagonal outlane guide
+            path = new Path2D();
+            path.moveTo(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50);
+            path.lineTo(FLIPPER_CENTER + dir * FLIPPER_SPREAD, FLIPPER_Y - 50 + 18 * 3);
+            drawWallPath(path, '#ff6600', 8, '#ff8800');
+
+            // Slingshot outer wall
+            const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
+            const slingTopY = FLIPPER_Y - 120;
+            const slingBottomY = FLIPPER_Y - 70;
+
+            path = new Path2D();
+            path.moveTo(slingOuterX, slingTopY);
+            path.lineTo(slingOuterX, slingBottomY);
+            drawWallPath(path, '#00dddd', 6, '#00ffff');
+        }
+    }
+
+    // Draw slingshot triangles with glow
+    function drawSlingshots() {
+        for (let side = 0; side < 2; side++) {
+            const dir = side * 2 - 1;
+            const slingInnerX = FLIPPER_CENTER + dir * FLIPPER_SPREAD;
+            const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
+            const slingTopY = FLIPPER_Y - 120;
+            const slingBottomY = FLIPPER_Y - 70;
+            const slingBottomInnerY = slingBottomY + 25;
+
+            // Check if slingshot is bouncing
+            let isBouncing = false;
+            for (const obj of objects) {
+                if (obj.isSlingshot && obj.bounce > 0) {
+                    const dx = Math.abs(obj.x - (slingOuterX + slingInnerX) / 2);
+                    if (dx < 30) {
+                        isBouncing = true;
+                        break;
+                    }
+                }
+            }
+
+            const baseColor = isBouncing ? '#ffffff' : '#ff00aa';
+            const glowColor = isBouncing ? '#ffffff' : '#ff00ff';
+
+            // Glow behind
+            ctx.save();
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = isBouncing ? 20 : 10;
+
+            // Fill triangle
+            const grad = ctx.createLinearGradient(slingOuterX, slingTopY, slingInnerX, slingBottomInnerY);
+            grad.addColorStop(0, baseColor);
+            grad.addColorStop(1, darkenColor(baseColor, 30));
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.moveTo(slingOuterX, slingTopY);
+            ctx.lineTo(slingInnerX, slingBottomInnerY);
+            ctx.lineTo(slingOuterX, slingBottomY);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            // Border
+            ctx.strokeStyle = lightenColor(baseColor, 30);
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(slingOuterX, slingTopY);
+            ctx.lineTo(slingInnerX, slingBottomInnerY);
+            ctx.stroke();
+        }
+    }
+
+    // Draw flippers with glow and depth
+    function drawFlippers() {
+        for (let side = 0; side < 2; side++) {
+            const isLeft = side === 0;
+            const isPressed = isLeft ? keys.z : keys.x;
+            const flipperAngle = isLeft ? flipperLeft : flipperRight;
+            const baseColor = isLeft ? '#ff0080' : '#0080ff';
+            const activeColor = isLeft ? '#ff00ff' : '#00ffff';
+            const color = isPressed ? activeColor : baseColor;
+
+            // Collect flipper segment positions
+            const segments = [];
+            for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+                const objIndex = isLeft ? (1 + i) : (1 + FLIPPER_SEGMENTS + i);
+                const obj = objects[objIndex];
+                if (obj) {
+                    segments.push({ x: obj.x, y: obj.y, radius: obj.radius });
+                }
+            }
+
+            if (segments.length < 2) continue;
+
+            // Draw glow
+            ctx.save();
+            ctx.shadowColor = color;
+            ctx.shadowBlur = isPressed ? 20 : 10;
+
+            // Draw as filled shape
+            ctx.fillStyle = color;
+            ctx.beginPath();
+
+            // Top edge
+            for (let i = 0; i < segments.length; i++) {
+                const s = segments[i];
+                const x = s.x;
+                const y = s.y - s.radius * 0.8;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+
+            // Round tip
+            const lastSeg = segments[segments.length - 1];
+            ctx.arc(lastSeg.x, lastSeg.y, lastSeg.radius * 0.8, -Math.PI/2, Math.PI/2);
+
+            // Bottom edge (reverse)
+            for (let i = segments.length - 1; i >= 0; i--) {
+                const s = segments[i];
+                ctx.lineTo(s.x, s.y + s.radius * 0.8);
+            }
+
+            // Round base
+            const firstSeg = segments[0];
+            ctx.arc(firstSeg.x, firstSeg.y, firstSeg.radius * 0.8, Math.PI/2, -Math.PI/2);
+
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            // Gradient overlay for 3D effect
+            const gradX = segments[0].x;
+            const gradY = segments[0].y;
+            const grad = ctx.createLinearGradient(gradX, gradY - 15, gradX, gradY + 15);
+            grad.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+            grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.1)');
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0.2)');
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            for (let i = 0; i < segments.length; i++) {
+                const s = segments[i];
+                const x = s.x;
+                const y = s.y - s.radius * 0.8;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.arc(lastSeg.x, lastSeg.y, lastSeg.radius * 0.8, -Math.PI/2, Math.PI/2);
+            for (let i = segments.length - 1; i >= 0; i--) {
+                const s = segments[i];
+                ctx.lineTo(s.x, s.y + s.radius * 0.8);
+            }
+            ctx.arc(firstSeg.x, firstSeg.y, firstSeg.radius * 0.8, Math.PI/2, -Math.PI/2);
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
+    // Draw the ball with enhanced glow and trail
+    function drawBall3D(x, y, radius, vx, vy) {
+        // Motion trail
+        const speed = Math.sqrt(vx * vx + vy * vy);
+        const trailLength = Math.min(5, Math.floor(speed * 3));
+
+        for (let i = trailLength; i > 0; i--) {
+            const alpha = 0.1 * (1 - i / trailLength);
+            const trailX = x - vx * i * 2;
+            const trailY = y - vy * i * 2;
+            const trailRadius = radius * (1 - i * 0.1);
+
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+            ctx.beginPath();
+            ctx.arc(trailX, trailY, trailRadius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Outer glow
+        ctx.save();
+        const glow = ctx.createRadialGradient(x, y, radius * 0.5, x, y, radius * 2.5);
+        glow.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
+        glow.addColorStop(0.5, 'rgba(200, 200, 255, 0.1)');
+        glow.addColorStop(1, 'transparent');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(x, y, radius * 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.beginPath();
+        ctx.ellipse(x + 2, y + 3, radius * 0.8, radius * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Main ball body
+        const ballGrad = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
+        ballGrad.addColorStop(0, '#ffffff');
+        ballGrad.addColorStop(0.3, '#e8e8ff');
+        ballGrad.addColorStop(0.7, '#c0c0d0');
+        ballGrad.addColorStop(1, '#808090');
+
+        ctx.fillStyle = ballGrad;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Chrome ring
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(x, y, radius - 1, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Top highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.beginPath();
+        ctx.ellipse(x - radius * 0.3, y - radius * 0.35, radius * 0.3, radius * 0.15, -0.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Specular point
+        ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+        ctx.beginPath();
+        ctx.arc(x - radius * 0.35, y - radius * 0.4, radius * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Draw shooter lane with glow
+    function drawShooterLane() {
+        const shooterStart = 1 + FLIPPER_SEGMENTS * 2;
+        let minY = TABLE_HEIGHT;
+        let maxY = 0;
+
+        for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+            const shooter = objects[shooterStart + i];
+            if (shooter && shooter.isShooter) {
+                minY = Math.min(minY, shooter.y);
+                maxY = Math.max(maxY, shooter.y);
+            }
+        }
+
+        const plungerX = CENTER_X + DOME_RADIUS - BALL_RADIUS;
+        const plungerWidth = 12;
+
+        // Plunger housing
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(plungerX - plungerWidth/2 - 2, minY - 10, plungerWidth + 4, maxY - minY + 20);
+
+        // Plunger shaft
+        const grad = ctx.createLinearGradient(plungerX - plungerWidth/2, 0, plungerX + plungerWidth/2, 0);
+        grad.addColorStop(0, '#004400');
+        grad.addColorStop(0.3, '#00aa00');
+        grad.addColorStop(0.7, '#00aa00');
+        grad.addColorStop(1, '#004400');
+
+        ctx.fillStyle = grad;
+        ctx.fillRect(plungerX - plungerWidth/2, minY, plungerWidth, maxY - minY);
+
+        // Plunger tip
+        ctx.fillStyle = '#00ff00';
+        ctx.beginPath();
+        ctx.arc(plungerX, minY, plungerWidth/2, Math.PI, 0);
+        ctx.fill();
+
+        // Glow when compressed
+        if (keys.c) {
+            ctx.save();
+            ctx.shadowColor = '#00ff00';
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = '#00ff00';
+            ctx.beginPath();
+            ctx.arc(plungerX, minY, plungerWidth/2, Math.PI, 0);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    // Color utility functions
+    function lightenColor(hex, percent) {
+        const num = parseInt(hex.replace('#', ''), 16);
+        const r = Math.min(255, (num >> 16) + percent);
+        const g = Math.min(255, ((num >> 8) & 0x00FF) + percent);
+        const b = Math.min(255, (num & 0x0000FF) + percent);
+        return '#' + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
+    }
+
+    function darkenColor(hex, percent) {
+        const num = parseInt(hex.replace('#', ''), 16);
+        const r = Math.max(0, (num >> 16) - percent);
+        const g = Math.max(0, ((num >> 8) & 0x00FF) - percent);
+        const b = Math.max(0, (num & 0x0000FF) - percent);
+        return '#' + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
+    }
+
+    // Simple circle for small elements
     function drawCircle(x, y, radius, color) {
         ctx.fillStyle = color;
         ctx.beginPath();
@@ -2427,6 +2956,73 @@
         ctx.fill();
 
         ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.beginPath();
+        ctx.arc(x - radius * 0.2, y - radius * 0.2, radius * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Small pin with subtle 3D effect
+    function drawPin3D(x, y, radius, color) {
+        // Small shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.beginPath();
+        ctx.ellipse(x + 1, y + 2, radius * 0.8, radius * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Body
+        const grad = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
+        grad.addColorStop(0, lightenColor(color, 80));
+        grad.addColorStop(0.5, color);
+        grad.addColorStop(1, darkenColor(color, 40));
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.beginPath();
+        ctx.arc(x - radius * 0.25, y - radius * 0.25, radius * 0.25, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Draw drop target with 3D look
+    function drawDropTarget3D(x, y, radius, color, isActive) {
+        if (!isActive) {
+            // Inactive - just a dark recess
+            ctx.fillStyle = '#222200';
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+            return;
+        }
+
+        // Shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.beginPath();
+        ctx.ellipse(x + 1, y + 2, radius, radius * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Glow
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 8;
+
+        // Body
+        const grad = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
+        grad.addColorStop(0, lightenColor(color, 60));
+        grad.addColorStop(0.5, color);
+        grad.addColorStop(1, darkenColor(color, 50));
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
         ctx.beginPath();
         ctx.arc(x - radius * 0.2, y - radius * 0.2, radius * 0.3, 0, Math.PI * 2);
         ctx.fill();
@@ -2440,204 +3036,410 @@
         ctx.translate(offsetX, offsetY);
         ctx.scale(scale, scale);
 
-        // Background grid
-        ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)';
-        ctx.lineWidth = 1;
-        for (let x = 0; x < TABLE_WIDTH; x += 25) {
-            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, TABLE_HEIGHT); ctx.stroke();
-        }
-        for (let y = 0; y < TABLE_HEIGHT; y += 25) {
-            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(TABLE_WIDTH, y); ctx.stroke();
-        }
+        // Animated glowing grid background
+        drawAnimatedGrid();
 
+        // Draw smooth walls (aesthetic layer over physics circles)
+        drawSmoothWalls();
+
+        // Draw slingshots with glow
+        drawSlingshots();
+
+        // Draw flippers with enhanced glow
+        drawFlippers();
+
+        // Draw shooter lane
+        drawShooterLane();
+
+        // Border with glow
+        ctx.save();
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur = 10;
         ctx.strokeStyle = '#00ffff';
         ctx.lineWidth = 3;
         ctx.strokeRect(5, 5, TABLE_WIDTH - 10, TABLE_HEIGHT - 10);
+        ctx.restore();
 
-        // Draw all objects EXCEPT ball (ball drawn last on top)
+        // Draw game objects with enhanced rendering
         const ball = objects[0];
+
+        // First pass: Draw drop targets
         for (let i = objects.length - 1; i >= 1; i--) {
             const obj = objects[i];
-            let color = obj.color;
-
-            if (obj.bounce > 0) { color = '#ffffff'; }
-
-            if (i >= 1 && i <= FLIPPER_SEGMENTS) {
-                color = keys.z ? '#ff00ff' : '#ff0080';
-            } else if (i > FLIPPER_SEGMENTS && i <= FLIPPER_SEGMENTS * 2) {
-                color = keys.x ? '#00ffff' : '#0080ff';
-            }
-
-            if (obj.isShooter) { color = '#00aa00'; }
-
             if (obj.isDropTarget) {
-                if (!obj.active) { color = '#333300'; }
-                else if (obj.bounce > 0) { color = '#ffffff'; }
-                else if (obj.isRampDropTarget) { color = '#ff8800'; }  // Table 2 ramp drop target
-                else { color = DROP_COLORS[targetLevel % DROP_COLORS.length]; }
+                let color = DROP_COLORS[targetLevel % DROP_COLORS.length];
+                if (obj.isRampDropTarget) color = '#ff8800';
+                if (obj.bounce > 0) color = '#ffffff';
+                drawDropTarget3D(obj.x, obj.y, obj.radius + (obj.bounce || 0), color, obj.active);
             }
+        }
 
-            // Table 2: Standup targets
+        // Second pass: Draw bumpers (pop bumpers with 3D effect)
+        for (let i = objects.length - 1; i >= 1; i--) {
+            const obj = objects[i];
+            if (obj.type === TYPE_BUMPER && !obj.isSlingshot) {
+                let color = obj.color;
+                if (obj.isCenterBumper && obj.bounce <= 0) {
+                    color = BUMPER_COLORS[spotCompletions % BUMPER_COLORS.length];
+                } else if (obj.isHighValue && obj.bounce <= 0) {
+                    color = '#ff0000';
+                }
+                if (obj.bounce > 0) color = '#ffffff';
+
+                // Use 3D bumper for larger bumpers
+                if (obj.radius >= 10) {
+                    drawBumper3D(obj.x, obj.y, obj.radius, color, obj.bounce > 0);
+                } else {
+                    // Smaller pins get simpler 3D treatment
+                    drawPin3D(obj.x, obj.y, obj.radius + (obj.bounce || 0), color);
+                }
+            }
+        }
+
+        // Third pass: Draw standup targets
+        for (let i = objects.length - 1; i >= 1; i--) {
+            const obj = objects[i];
             if (obj.isStandupTarget) {
                 const bank = obj.standupBank;
                 const idx = obj.standupIndex;
                 const isLit = bank === 'left' ? standupBankLeft[idx] : standupBankRight[idx];
-                if (obj.bounce > 0) { color = '#ffffff'; }
-                else { color = isLit ? '#00ff00' : '#006600'; }
+                let color = obj.bounce > 0 ? '#ffffff' : (isLit ? '#00ff00' : '#006600');
+                drawPin3D(obj.x, obj.y, obj.radius + (obj.bounce || 0), color);
             }
-
-            // Table 2: Spinner
-            if (obj.isSpinner) {
-                color = obj.bounce > 0 ? '#ffffff' : '#00ff88';
-            }
-
-            // Table 2: Scoop
-            if (obj.isScoop) {
-                color = scoopBallLocked ? '#ff00ff' : '#8800ff';
-            }
-
-            if (obj.isCenterBumper && obj.bounce <= 0) {
-                color = BUMPER_COLORS[spotCompletions % BUMPER_COLORS.length];
-            } else if (obj.isHighValue && obj.bounce <= 0) {
-                color = '#ff0000';
-            }
-
-            drawCircle(obj.x, obj.y, obj.radius + (obj.bounce || 0), color);
         }
 
-        // Draw lights, saucer, etc.
+        // Fourth pass: Draw center pin and top lane pins
+        for (let i = objects.length - 1; i >= 1; i--) {
+            const obj = objects[i];
+            // Skip flippers, shooter, bumpers, drop targets, standup targets
+            if (i >= 1 && i <= FLIPPER_SEGMENTS * 2) continue;
+            if (obj.isShooter) continue;
+            if (obj.type === TYPE_BUMPER) continue;
+            if (obj.isDropTarget) continue;
+            if (obj.isStandupTarget) continue;
+            if (obj.isSpinner) continue;
+            if (obj.isScoop) continue;
+            if (obj.isRampWall) continue;  // Walls handled by drawSmoothWalls
+
+            // These are decorative pins (center pin, top lane pins, etc.)
+            if (obj.isCenterPin) {
+                const color = safetyPinActive ? '#ffff00' : '#00ffff';
+                drawPin3D(obj.x, obj.y, obj.radius, color);
+            } else if (obj.radius <= 6) {
+                // Small pins at top lanes
+                drawPin3D(obj.x, obj.y, obj.radius, obj.color || '#00ffff');
+            }
+        }
+
+        // Draw lights with enhanced glow effects
         const topLaneLightY = TOP_LANE_Y;
         for (let i = 0; i < 3; i++) {
             const lx = (TOP_LANE_PINS[i] + TOP_LANE_PINS[i + 1]) / 2;
-            drawCircle(lx, topLaneLightY, 10, topLaneLights[i] ? '#ffff00' : '#333333');
+            const isLit = topLaneLights[i];
+
+            if (isLit) {
+                // Glow effect for lit lights
+                ctx.save();
+                const glow = ctx.createRadialGradient(lx, topLaneLightY, 2, lx, topLaneLightY, 20);
+                glow.addColorStop(0, 'rgba(255, 255, 0, 0.6)');
+                glow.addColorStop(0.5, 'rgba(255, 200, 0, 0.2)');
+                glow.addColorStop(1, 'transparent');
+                ctx.fillStyle = glow;
+                ctx.beginPath();
+                ctx.arc(lx, topLaneLightY, 20, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Light body
+            const lightGrad = ctx.createRadialGradient(lx - 3, topLaneLightY - 3, 0, lx, topLaneLightY, 10);
+            if (isLit) {
+                lightGrad.addColorStop(0, '#ffffff');
+                lightGrad.addColorStop(0.4, '#ffff00');
+                lightGrad.addColorStop(1, '#aa8800');
+            } else {
+                lightGrad.addColorStop(0, '#555555');
+                lightGrad.addColorStop(0.4, '#333333');
+                lightGrad.addColorStop(1, '#222222');
+            }
+            ctx.fillStyle = lightGrad;
+            ctx.beginPath();
+            ctx.arc(lx, topLaneLightY, 10, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Highlight
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.beginPath();
+            ctx.arc(lx - 3, topLaneLightY - 3, 3, 0, Math.PI * 2);
+            ctx.fill();
         }
 
+        // Spot targets with enhanced rendering
         for (let i = 0; i < 4; i++) {
             const st = SPOT_TARGET_POSITIONS[i];
-            const stColor = spotTargets[i] ? SPOT_LIT[targetLevel % SPOT_LIT.length] : SPOT_DARK[targetLevel % SPOT_DARK.length];
-            drawCircle(st.x, st.y, 6, stColor);
+            const isLit = spotTargets[i];
+            const litColor = SPOT_LIT[targetLevel % SPOT_LIT.length];
+            const darkColor = SPOT_DARK[targetLevel % SPOT_DARK.length];
+
+            if (isLit) {
+                // Glow for lit spots
+                ctx.save();
+                ctx.shadowColor = litColor;
+                ctx.shadowBlur = 12;
+                ctx.fillStyle = litColor;
+                ctx.beginPath();
+                ctx.arc(st.x, st.y, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            drawPin3D(st.x, st.y, 6, isLit ? litColor : darkColor);
         }
 
+        // Lane lights with glow
         for (let i = 0; i < 4; i++) {
             const ll = LANE_LIGHT_POSITIONS[i];
-            drawCircle(ll.x, ll.y, 5, laneLights[i] ? '#00ff00' : '#333333');
+            const isLit = laneLights[i];
+
+            if (isLit) {
+                ctx.save();
+                const glow = ctx.createRadialGradient(ll.x, ll.y, 2, ll.x, ll.y, 15);
+                glow.addColorStop(0, 'rgba(0, 255, 0, 0.5)');
+                glow.addColorStop(0.5, 'rgba(0, 200, 0, 0.2)');
+                glow.addColorStop(1, 'transparent');
+                ctx.fillStyle = glow;
+                ctx.beginPath();
+                ctx.arc(ll.x, ll.y, 15, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            drawPin3D(ll.x, ll.y, 5, isLit ? '#00ff00' : '#333333');
         }
 
-        ctx.strokeStyle = saucerActive ? (frame % 10 < 5 ? '#ffffff' : '#aaaaaa') : '#555555';
-        ctx.lineWidth = 2;
+        // Saucer with enhanced rendering
+        const saucerColor = saucerActive ? (frame % 10 < 5 ? '#ffffff' : '#00ffff') : '#555555';
+
+        if (saucerActive) {
+            // Pulsing glow when active
+            ctx.save();
+            const pulseIntensity = 0.3 + 0.2 * Math.sin(frame * 0.1);
+            const saucerGlow = ctx.createRadialGradient(SAUCER_X, SAUCER_Y, 5, SAUCER_X, SAUCER_Y, 30);
+            saucerGlow.addColorStop(0, `rgba(0, 255, 255, ${pulseIntensity})`);
+            saucerGlow.addColorStop(0.5, `rgba(0, 200, 255, ${pulseIntensity * 0.5})`);
+            saucerGlow.addColorStop(1, 'transparent');
+            ctx.fillStyle = saucerGlow;
+            ctx.beginPath();
+            ctx.arc(SAUCER_X, SAUCER_Y, 30, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Saucer body
+        ctx.save();
+        ctx.shadowColor = saucerColor;
+        ctx.shadowBlur = saucerActive ? 15 : 5;
+        ctx.strokeStyle = saucerColor;
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(SAUCER_X, SAUCER_Y, SAUCER_RADIUS, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.restore();
+
+        // Saucer inner gradient
+        const innerGrad = ctx.createRadialGradient(SAUCER_X, SAUCER_Y, 0, SAUCER_X, SAUCER_Y, SAUCER_RADIUS);
+        innerGrad.addColorStop(0, 'rgba(0, 50, 100, 0.8)');
+        innerGrad.addColorStop(1, 'rgba(0, 20, 40, 0.9)');
+        ctx.fillStyle = innerGrad;
+        ctx.beginPath();
+        ctx.arc(SAUCER_X, SAUCER_Y, SAUCER_RADIUS - 2, 0, Math.PI * 2);
+        ctx.fill();
 
         if (!saucerActive) {
             const nextThreshold = saucerLevel < SAUCER_THRESHOLDS.length
                 ? SAUCER_THRESHOLDS[saucerLevel]
                 : SAUCER_THRESHOLDS[SAUCER_THRESHOLDS.length - 1] * 2;
-            ctx.fillStyle = '#555555';
-            ctx.font = '8px Arial';
+            ctx.fillStyle = '#888888';
+            ctx.font = 'bold 8px Arial';
             ctx.textAlign = 'center';
             ctx.fillText(nextThreshold, SAUCER_X, SAUCER_Y + 3);
         }
 
         // === TABLE 2 SPECIFIC RENDERING ===
         if (currentTable === 2) {
-            // Draw ramp path guide
+            // Draw ramp path guide with glow
+            ctx.save();
+            if (!rampDropTargetActive) {
+                ctx.shadowColor = '#00ff88';
+                ctx.shadowBlur = 10;
+            }
             ctx.strokeStyle = rampDropTargetActive ? '#444444' : '#00ff88';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 3;
             ctx.beginPath();
             ctx.moveTo(45, 230);
             ctx.quadraticCurveTo(30, 160, 70, 100);
             ctx.quadraticCurveTo(120, 80, 140, 120);
             ctx.stroke();
+            ctx.restore();
 
-            // Draw "RAMP" label
+            // Ramp rails (3D look)
+            if (!rampDropTargetActive) {
+                ctx.strokeStyle = '#00aa66';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(40, 230);
+                ctx.quadraticCurveTo(25, 160, 65, 100);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(50, 230);
+                ctx.quadraticCurveTo(35, 160, 75, 100);
+                ctx.stroke();
+            }
+
+            // Draw "RAMP" label with glow
+            ctx.save();
+            if (!rampDropTargetActive) {
+                ctx.shadowColor = '#00ff88';
+                ctx.shadowBlur = 8;
+            }
             ctx.fillStyle = rampDropTargetActive ? '#666666' : '#00ff88';
             ctx.font = 'bold 10px Arial';
             ctx.textAlign = 'center';
             ctx.fillText('RAMP', 55, 250);
+            ctx.restore();
 
-            // Draw spinner - realistic coin-flip style
+            // Draw spinner - realistic coin-flip style with enhanced effects
             if (table2Spinner) {
-                const spinnerWidth = 30;  // Width of lane the spinner spans
-                const spinnerHeight = 20; // Height of the spinning piece
-
-                // Calculate the apparent width based on spin angle (coin flip effect)
-                // As it spins, the width goes from full to thin to full (like viewing a coin edge-on)
+                const spinnerWidth = 30;
+                const spinnerHeight = 20;
                 const spinPhase = (spinnerAngle * Math.PI) / 180;
                 const apparentWidth = Math.abs(Math.cos(spinPhase)) * spinnerHeight;
+                const isSpinning = spinnerSpeed > 5;
 
                 ctx.save();
                 ctx.translate(SPINNER_X, SPINNER_Y);
 
-                // Draw the thin axle line that the spinner rotates on
-                ctx.strokeStyle = '#005533';
-                ctx.lineWidth = 2;
+                // Glow when spinning
+                if (isSpinning) {
+                    const spinGlow = ctx.createRadialGradient(0, 0, 5, 0, 0, 25);
+                    spinGlow.addColorStop(0, 'rgba(0, 255, 136, 0.4)');
+                    spinGlow.addColorStop(1, 'transparent');
+                    ctx.fillStyle = spinGlow;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 25, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Axle with 3D effect
+                const axleGrad = ctx.createLinearGradient(0, -2, 0, 2);
+                axleGrad.addColorStop(0, '#008855');
+                axleGrad.addColorStop(0.5, '#00aa66');
+                axleGrad.addColorStop(1, '#006644');
+                ctx.strokeStyle = axleGrad;
+                ctx.lineWidth = 4;
                 ctx.beginPath();
                 ctx.moveTo(-spinnerWidth / 2, 0);
                 ctx.lineTo(spinnerWidth / 2, 0);
                 ctx.stroke();
 
-                // Draw the spinning rectangle piece
-                // Width fluctuates to simulate the coin-flip perspective
+                // Spinning blade
                 const rectWidth = Math.max(2, apparentWidth);
-                const gradient = ctx.createLinearGradient(-rectWidth / 2, 0, rectWidth / 2, 0);
-                gradient.addColorStop(0, '#00aa66');
-                gradient.addColorStop(0.5, '#00ff88');
-                gradient.addColorStop(1, '#00aa66');
-                ctx.fillStyle = gradient;
+                const bladeGrad = ctx.createLinearGradient(-rectWidth / 2, 0, rectWidth / 2, 0);
+                bladeGrad.addColorStop(0, '#00aa66');
+                bladeGrad.addColorStop(0.3, '#00ffaa');
+                bladeGrad.addColorStop(0.7, '#00ffaa');
+                bladeGrad.addColorStop(1, '#00aa66');
 
-                // Draw rectangle centered on the axle
+                ctx.fillStyle = bladeGrad;
                 ctx.fillRect(-rectWidth / 2, -spinnerWidth / 2, rectWidth, spinnerWidth);
 
-                // Add edge highlights when nearly edge-on
-                if (apparentWidth < 8) {
-                    ctx.strokeStyle = '#88ffcc';
-                    ctx.lineWidth = 1;
-                    ctx.strokeRect(-rectWidth / 2, -spinnerWidth / 2, rectWidth, spinnerWidth);
-                }
+                // Edge highlights
+                ctx.strokeStyle = '#aaffdd';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(-rectWidth / 2, -spinnerWidth / 2, rectWidth, spinnerWidth);
 
                 ctx.restore();
 
                 // Spinner label
+                ctx.save();
+                if (isSpinning) {
+                    ctx.shadowColor = '#00ff88';
+                    ctx.shadowBlur = 8;
+                }
                 ctx.fillStyle = '#00ff88';
                 ctx.font = 'bold 8px Arial';
                 ctx.textAlign = 'center';
                 ctx.fillText('SPIN', SPINNER_X, SPINNER_Y + 22);
+                ctx.restore();
             }
 
-            // Draw scoop
+            // Draw scoop with enhanced 3D effect
             if (table2Scoop) {
-                ctx.strokeStyle = scoopBallLocked ? '#ff00ff' : '#8800ff';
-                ctx.lineWidth = 3;
+                const scoopColor = scoopBallLocked ? '#ff00ff' : '#8800ff';
+
+                // Glow when ball locked
+                if (scoopBallLocked) {
+                    ctx.save();
+                    const scoopGlow = ctx.createRadialGradient(SCOOP_X, SCOOP_Y, 5, SCOOP_X, SCOOP_Y, 30);
+                    scoopGlow.addColorStop(0, 'rgba(255, 0, 255, 0.5)');
+                    scoopGlow.addColorStop(0.5, 'rgba(255, 0, 255, 0.2)');
+                    scoopGlow.addColorStop(1, 'transparent');
+                    ctx.fillStyle = scoopGlow;
+                    ctx.beginPath();
+                    ctx.arc(SCOOP_X, SCOOP_Y, 30, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                // Scoop rim with depth
+                ctx.save();
+                ctx.shadowColor = scoopColor;
+                ctx.shadowBlur = 10;
+                ctx.strokeStyle = scoopColor;
+                ctx.lineWidth = 4;
                 ctx.beginPath();
                 ctx.arc(SCOOP_X, SCOOP_Y, SCOOP_RADIUS + 2, Math.PI * 0.3, Math.PI * 0.7, true);
                 ctx.stroke();
+                ctx.restore();
 
-                // Scoop opening
-                ctx.fillStyle = '#220044';
+                // Scoop hole gradient
+                const holeGrad = ctx.createRadialGradient(SCOOP_X, SCOOP_Y, 0, SCOOP_X, SCOOP_Y, SCOOP_RADIUS);
+                holeGrad.addColorStop(0, '#110022');
+                holeGrad.addColorStop(0.7, '#220044');
+                holeGrad.addColorStop(1, '#330066');
+                ctx.fillStyle = holeGrad;
                 ctx.beginPath();
                 ctx.arc(SCOOP_X, SCOOP_Y, SCOOP_RADIUS - 2, 0, Math.PI * 2);
                 ctx.fill();
 
                 // Draw locked ball in scoop
                 if (scoopBallLocked) {
-                    ctx.fillStyle = frame % 10 < 5 ? '#ffffff' : '#ff00ff';
-                    ctx.beginPath();
-                    ctx.arc(SCOOP_X, SCOOP_Y, BALL_RADIUS, 0, Math.PI * 2);
-                    ctx.fill();
+                    const lockPulse = 0.8 + 0.2 * Math.sin(frame * 0.15);
+                    ctx.save();
+                    ctx.globalAlpha = lockPulse;
+                    drawBall3D(SCOOP_X, SCOOP_Y, BALL_RADIUS, 0, 0);
+                    ctx.restore();
 
-                    // "LOCKED" text
-                    ctx.fillStyle = '#ff00ff';
+                    // "LOCKED" text with glow
+                    ctx.save();
+                    ctx.shadowColor = '#ff00ff';
+                    ctx.shadowBlur = 10;
+                    ctx.fillStyle = frame % 10 < 5 ? '#ff00ff' : '#ffffff';
                     ctx.font = 'bold 9px Arial';
                     ctx.textAlign = 'center';
                     ctx.fillText('LOCKED', SCOOP_X, SCOOP_Y + 28);
+                    ctx.restore();
                 }
 
                 // Scoop label
-                ctx.fillStyle = '#8800ff';
+                ctx.save();
+                ctx.shadowColor = scoopColor;
+                ctx.shadowBlur = 5;
+                ctx.fillStyle = scoopColor;
                 ctx.font = 'bold 8px Arial';
                 ctx.textAlign = 'center';
                 ctx.fillText('LOCK', SCOOP_X, SCOOP_Y - 22);
+                ctx.restore();
             }
 
             // Draw standup target bank labels
@@ -2677,11 +3479,15 @@
                 ctx.restore();
             }
 
-            // Table 2 indicator
+            // Table 2 indicator with subtle glow
+            ctx.save();
+            ctx.shadowColor = '#00ff88';
+            ctx.shadowBlur = 8;
             ctx.fillStyle = '#00ff88';
             ctx.font = 'bold 10px Arial';
             ctx.textAlign = 'left';
             ctx.fillText('TABLE 2', 10, TABLE_HEIGHT - 15);
+            ctx.restore();
         }
 
         // Table transition effect
@@ -2700,20 +3506,22 @@
             ctx.restore();
         }
 
+        // Score multiplier with pulsing glow
         if (scoreMultiplier > 1) {
+            ctx.save();
+            const multPulse = 0.8 + 0.2 * Math.sin(frame * 0.1);
+            ctx.shadowColor = '#ff8800';
+            ctx.shadowBlur = 10 * multPulse;
             ctx.fillStyle = '#ff8800';
-            ctx.font = '14px Arial';
+            ctx.font = 'bold 16px Arial';
             ctx.textAlign = 'center';
             ctx.fillText(scoreMultiplier + 'X', CENTER_X, FLIPPER_Y - 140);
+            ctx.restore();
         }
 
-        // Draw ball LAST (on top of everything)
+        // Draw ball LAST (on top of everything) with enhanced 3D rendering
         if (ball.x > -50) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-            ctx.beginPath();
-            ctx.arc(ball.x - ball.vx * 3, ball.y - ball.vy * 3, ball.radius * 0.8, 0, Math.PI * 2);
-            ctx.fill();
-            drawCircle(ball.x, ball.y, ball.radius, '#ffffff');
+            drawBall3D(ball.x, ball.y, ball.radius, ball.vx, ball.vy);
         }
 
         // Draw mute button during gameplay
@@ -2777,12 +3585,25 @@
             ctx.restore();
         }
 
-        // Draw particles
+        // Draw particles with enhanced glow
         for (const p of particles) {
-            ctx.globalAlpha = Math.max(0, p.life / 80);
+            const alpha = Math.max(0, p.life / 80);
+            ctx.globalAlpha = alpha;
+
+            // Particle glow
+            ctx.save();
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 8;
             ctx.fillStyle = p.color;
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // Bright center
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius * 0.4, 0, Math.PI * 2);
             ctx.fill();
         }
         ctx.globalAlpha = 1;
