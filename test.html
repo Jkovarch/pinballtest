@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pinball Breakout - Endless Mode</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a12;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        #gameCanvas {
+            display: block;
+            background: #0a0a12;
+        }
+
+        #hud {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            justify-content: space-between;
+            font-family: 'Arial', sans-serif;
+            color: #fff;
+            z-index: 20;
+            pointer-events: none;
+        }
+
+        .hud-item {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 15px;
+            border-radius: 20px;
+            border: 2px solid;
+        }
+
+        #scoreDisplay {
+            border-color: #ff00ff;
+        }
+
+        #ballDisplay {
+            border-color: #00ffff;
+        }
+
+        #waveDisplay {
+            border-color: #ffff00;
+        }
+
+        #instructions {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            font-family: 'Arial', sans-serif;
+            color: #fff;
+            z-index: 30;
+            pointer-events: none;
+            opacity: 0.9;
+            transition: opacity 0.5s;
+        }
+
+        #instructions.hidden {
+            opacity: 0;
+        }
+
+        #instructions h1 {
+            font-size: 2em;
+            color: #ff00ff;
+            margin-bottom: 10px;
+            letter-spacing: 3px;
+        }
+
+        #instructions h2 {
+            font-size: 1.2em;
+            color: #ffff00;
+            margin-bottom: 15px;
+        }
+
+        #instructions p {
+            font-size: 0.9em;
+            margin: 8px 0;
+            color: #00ffff;
+        }
+
+        .key {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 12px;
+            border-radius: 5px;
+            margin: 0 5px;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="hud">
+        <div id="scoreDisplay" class="hud-item">SCORE: <span id="score">0</span></div>
+        <div id="waveDisplay" class="hud-item">WAVE: <span id="wave">1</span></div>
+        <div id="ballDisplay" class="hud-item">BALLS: <span id="balls">3</span></div>
+    </div>
+
+    <div id="instructions">
+        <h1>PINBALL BREAKOUT</h1>
+        <h2>Endless Survival Mode</h2>
+        <p>Hit blocks to score points - Don't let them reach the flippers!</p>
+        <p><span class="key">Z</span> Left Flipper <span class="key">/</span> Right Flipper</p>
+        <p><span class="key">SPACE</span> or <span class="key">C</span> Launch Ball</p>
+        <p>Blocks reaching bottom: <span style="color:#ff4444">-1000 points</span></p>
+    </div>
+
+    <script>
+    'use strict';
+
+    // === SOUND SYSTEM ===
+    const SndCtx = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+    const soundBuffers = {};
+    let audioInitialized = false;
+    let soundMuted = false;
+
+    function initAudio() {
+        if (audioCtx) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            return;
+        }
+        try {
+            audioCtx = new SndCtx();
+            audioInitialized = true;
+            loadAllSounds();
+        } catch (e) { console.warn('Audio init failed:', e); }
+    }
+
+    async function loadSound(name, url) {
+        try {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            soundBuffers[name] = await audioCtx.decodeAudioData(arrayBuffer);
+        } catch (e) {}
+    }
+
+    async function loadAllSounds() {
+        const sounds = [
+            'Flipper1', 'Flipper2', 'Flipper3',
+            'PopBumper1', 'PopBumper2', 'PopBumper3', 'PopBumper4', 'PopBumper5',
+            'SlingShot1', 'SlingShot2', 'SlingShot3',
+            'Wall1', 'Wall2', 'Wall3',
+            'Plunge', 'BallDrain', 'BallSave'
+        ];
+        for (const s of sounds) {
+            await loadSound(s, 'PinballSounds/' + s + '.mp3');
+        }
+    }
+
+    function playSound(name) {
+        if (!audioCtx || !soundBuffers[name] || soundMuted) return;
+        try {
+            const source = audioCtx.createBufferSource();
+            source.buffer = soundBuffers[name];
+            source.connect(audioCtx.destination);
+            source.start(0);
+        } catch (e) {}
+    }
+
+    function playRandomSound(prefix, count) {
+        playSound(prefix + (Math.floor(Math.random() * count) + 1));
+    }
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // === CONSTANTS ===
+    const TABLE_WIDTH = 400;
+    const TABLE_HEIGHT = 700;
+    const CENTER_X = TABLE_WIDTH / 2 - 20;
+    const BALL_RADIUS = 7;
+    const WALL_RADIUS = 5;
+    const DOME_RADIUS = 150;
+    const FLIPPER_RADIUS = 10;
+    const FLIPPER_SEGMENTS = 45;
+    const FLIPPER_SPREAD = 55;
+    const FLIPPER_Y = TABLE_HEIGHT - 60;
+    const FLIPPER_Y_ACTUAL = FLIPPER_Y + 14;
+    const FLIPPER_CENTER = CENTER_X - BALL_RADIUS - WALL_RADIUS;
+    const SHOOTER_X = CENTER_X + DOME_RADIUS - BALL_RADIUS;
+    const SHOOTER_Y = TABLE_HEIGHT - 60;
+    const RESTITUTION = 1.3;
+    const BLOCK_RESTITUTION = 1.5;
+    const PHYSICS_SUBSTEPS = 9;
+    const GRAVITY = 0.0017;
+
+    const TYPE_WALL = 0;
+    const TYPE_BUMPER = 1;
+    const TYPE_BLOCK = 2;
+
+    // Block/Tetris settings
+    const BLOCK_SIZE = 20;
+    const BLOCK_RADIUS = 12;  // Collision radius for blocks
+    const BLOCK_SPAWN_Y = 60;  // Where blocks spawn
+    const BLOCK_BOTTOM_Y = FLIPPER_Y - 80;  // Where blocks get destroyed
+    const BLOCK_SPEED = 0.015;  // How fast blocks descend (pixels per frame)
+    const SPAWN_INTERVAL = 600;  // Frames between spawning new block groups
+    const BLOCK_HIT_POINTS = 100;
+    const BLOCK_PENALTY = 1000;
+
+    // Tetris-like shapes (relative positions)
+    const BLOCK_SHAPES = [
+        // I piece
+        [[0, 0], [1, 0], [2, 0], [3, 0]],
+        // O piece
+        [[0, 0], [1, 0], [0, 1], [1, 1]],
+        // T piece
+        [[0, 0], [1, 0], [2, 0], [1, 1]],
+        // L piece
+        [[0, 0], [0, 1], [0, 2], [1, 2]],
+        // J piece
+        [[1, 0], [1, 1], [1, 2], [0, 2]],
+        // S piece
+        [[1, 0], [2, 0], [0, 1], [1, 1]],
+        // Z piece
+        [[0, 0], [1, 0], [1, 1], [2, 1]],
+        // Small bar
+        [[0, 0], [1, 0]],
+        // Single block
+        [[0, 0]],
+        // Plus shape
+        [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2]]
+    ];
+
+    const BLOCK_COLORS = [
+        '#ff0066', '#00ff88', '#ffff00', '#ff8800',
+        '#00ffff', '#ff00ff', '#88ff00', '#0088ff'
+    ];
+
+    // Game states
+    const STATE_PLAYING = 0;
+    const STATE_GAME_OVER = 1;
+
+    // === GAME STATE ===
+    let objects = [];
+    let blocks = [];  // Active breakout blocks
+    let score = 0;
+    let ballCount = 3;
+    let wave = 1;
+    let frame = 0;
+    let gameStarted = false;
+    let scale = 1;
+    let offsetX = 0;
+    let offsetY = 0;
+    let spawnTimer = 0;
+    let gameState = STATE_PLAYING;
+    let gameOverTimer = 0;
+
+    let flipperLeft = 1;
+    let flipperRight = 1;
+    let keys = { z: false, x: false, c: false, space: false };
+
+    let particles = [];
+    let lastWallSoundTime = 0;
+
+    // Pop bumpers above outlanes (like original game)
+    let popBumpers = [];
+
+    // === PARTICLES ===
+    function createParticles(x, y, count, color) {
+        const colors = color ? [color] : ['#ff00ff', '#00ffff', '#ffff00', '#ff0000', '#00ff00', '#ff8800'];
+        for (let i = 0; i < count; i++) {
+            particles.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 5,
+                vy: (Math.random() - 0.5) * 5 - 1,
+                life: 40 + Math.random() * 80,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                radius: 1 + Math.random() * 3
+            });
+        }
+    }
+
+    function createBlockExplosion(x, y, color) {
+        for (let i = 0; i < 12; i++) {
+            const angle = (Math.PI * 2 * i) / 12;
+            const speed = 1.5 + Math.random() * 2;
+            particles.push({
+                x: x, y: y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: 25 + Math.random() * 30,
+                color: color,
+                radius: 2 + Math.random() * 3
+            });
+        }
+    }
+
+    // === OBJECT CREATION ===
+    function createObject(x, y, type = TYPE_WALL, radius = WALL_RADIUS) {
+        const obj = {
+            x: x, y: y, type: type, radius: radius,
+            vx: 0, vy: 0, bounce: 0,
+            color: type === TYPE_BUMPER ? '#ff00ff' : '#00ffff'
+        };
+        objects.push(obj);
+        return obj;
+    }
+
+    // === BLOCK GROUP SPAWNING ===
+    function spawnBlockGroup() {
+        const shapeIndex = Math.floor(Math.random() * BLOCK_SHAPES.length);
+        const shape = BLOCK_SHAPES[shapeIndex];
+        const color = BLOCK_COLORS[Math.floor(Math.random() * BLOCK_COLORS.length)];
+
+        // Calculate shape bounds
+        let maxX = 0;
+        for (const [bx, by] of shape) {
+            maxX = Math.max(maxX, bx);
+        }
+
+        // Random X position within table bounds (avoiding shooter lane)
+        const minSpawnX = 50;
+        const maxSpawnX = CENTER_X + DOME_RADIUS - 80 - (maxX * BLOCK_SIZE);
+        const startX = minSpawnX + Math.random() * (maxSpawnX - minSpawnX);
+
+        const groupId = Date.now() + Math.random();  // Unique group identifier
+
+        for (const [bx, by] of shape) {
+            blocks.push({
+                x: startX + bx * BLOCK_SIZE,
+                y: BLOCK_SPAWN_Y + by * BLOCK_SIZE,
+                width: BLOCK_SIZE - 2,
+                height: BLOCK_SIZE - 2,
+                color: color,
+                groupId: groupId,
+                active: true,
+                flash: 0
+            });
+        }
+    }
+
+    // === BUILD TABLE ===
+    function buildTable() {
+        objects = [];
+        blocks = [];
+        popBumpers = [];
+
+        // Create ball
+        const ball = createObject(SHOOTER_X, SHOOTER_Y - 20);
+        ball.radius = BALL_RADIUS;
+        ball.color = '#ffffff';
+        ball.isBall = true;
+
+        // Create flipper segments
+        for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+            createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
+            createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
+        }
+
+        // Create shooter lane segments
+        for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+            const shooter = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS, TABLE_HEIGHT - 10 + i, TYPE_WALL, 5);
+            shooter.isShooter = true;
+            shooter.shooterIndex = i;
+        }
+
+        const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
+
+        // Center pin below flippers
+        const centerPin = createObject(FLIPPER_CENTER, FLIPPER_Y + 25, TYPE_WALL, 5);
+        centerPin.isCenterPin = true;
+        centerPin.color = '#00ffff';
+
+        // Build both sides
+        for (let side = 0; side < 2; side++) {
+            const dir = side * 2 - 1;
+
+            // Side walls
+            for (let i = 0; i < 90; i++) {
+                createObject(CENTER_X + dir * DOME_BOTH, TABLE_HEIGHT - 7 * i);
+            }
+
+            // Dome curve at top
+            for (let i = 0; i < 55; i++) {
+                createObject(
+                    CENTER_X + dir * DOME_BOTH * Math.cos(i / 35),
+                    DOME_BOTH - DOME_BOTH * Math.sin(i / 35)
+                );
+            }
+
+            // Outlane walls
+            for (let i = 0; i < 12; i++) {
+                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50 - i * 7);
+            }
+
+            for (let i = 0; i < 19; i++) {
+                createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55 - i * 3), FLIPPER_Y - 50 + i * 3);
+            }
+
+            // Slingshots
+            const slingInnerX = FLIPPER_CENTER + dir * FLIPPER_SPREAD;
+            const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
+            const slingTopY = FLIPPER_Y - 120;
+            const slingBottomY = FLIPPER_Y - 70;
+            const slingBottomInnerY = slingBottomY + 25;
+
+            for (let i = 0; i <= 7; i++) {
+                const t = i / 7;
+                createObject(slingOuterX, slingTopY + t * (slingBottomY - slingTopY));
+            }
+
+            for (let i = 0; i <= 12; i++) {
+                const t = i / 12;
+                const sObj = createObject(
+                    slingOuterX + (slingInnerX - slingOuterX) * t,
+                    slingTopY + (slingBottomInnerY - slingTopY) * t,
+                    TYPE_BUMPER, 4
+                );
+                sObj.isSlingshot = true;
+            }
+
+            for (let i = 0; i <= 5; i++) {
+                const t = i / 5;
+                createObject(
+                    slingOuterX + (slingInnerX - slingOuterX) * t,
+                    slingBottomY + (slingBottomInnerY - slingBottomY) * t
+                );
+            }
+
+            // Pop bumpers above outlanes
+            const bumper = createObject(FLIPPER_CENTER + dir * 130, 470, TYPE_BUMPER, 15);
+            bumper.isPopBumper = true;
+            bumper.color = dir < 0 ? '#ff00ff' : '#00ff88';
+            popBumpers.push(bumper);
+        }
+
+        // Shooter wall
+        const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
+        for (let i = 0; i < 65; i++) {
+            createObject(shooterWallX, TABLE_HEIGHT - 7 * i);
+        }
+
+        // Spawn initial block groups
+        for (let i = 0; i < 3; i++) {
+            setTimeout(() => spawnBlockGroup(), i * 100);
+        }
+    }
+
+    // === RESET GAME ===
+    function resetGame() {
+        score = 0;
+        ballCount = 3;
+        wave = 1;
+        frame = 0;
+        spawnTimer = 0;
+        particles = [];
+        gameState = STATE_PLAYING;
+        gameStarted = false;
+
+        buildTable();
+
+        document.getElementById('score').textContent = score;
+        document.getElementById('balls').textContent = ballCount;
+        document.getElementById('wave').textContent = wave;
+        document.getElementById('instructions').classList.remove('hidden');
+
+        keys = { z: false, x: false, c: false, space: false };
+    }
+
+    function setupNewBall() {
+        const ball = objects[0];
+        ball.x = SHOOTER_X;
+        ball.y = SHOOTER_Y - 20;
+        ball.vx = 0;
+        ball.vy = 0;
+
+        // Reset shooter segments
+        const shooterStart = 1 + FLIPPER_SEGMENTS * 2;
+        for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+            const seg = objects[shooterStart + i];
+            if (seg && seg.isShooter) {
+                seg.y = SHOOTER_Y + i;
+                seg.vy = 0;
+            }
+        }
+
+        gameState = STATE_PLAYING;
+        keys.z = false;
+        keys.x = false;
+    }
+
+    // === PHYSICS UPDATE ===
+    function updatePhysics() {
+        const ball = objects[0];
+
+        for (let substep = 0; substep < PHYSICS_SUBSTEPS; substep++) {
+
+            // Update flippers
+            flipperLeft = Math.max(-1, Math.min(1, flipperLeft + (keys.z ? -0.07 : 0.05)));
+            flipperRight = Math.max(-1, Math.min(1, flipperRight + (keys.x ? -0.07 : 0.05)));
+
+            for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+                const leftObj = objects[1 + i];
+                const prevLeftX = leftObj.x;
+                const prevLeftY = leftObj.y;
+                leftObj.x = FLIPPER_CENTER + (-1) * (FLIPPER_SPREAD - i * Math.cos(flipperLeft / 2));
+                leftObj.y = FLIPPER_Y_ACTUAL + i * Math.sin(flipperLeft / 2);
+                leftObj.vx = leftObj.x - prevLeftX;
+                leftObj.vy = leftObj.y - prevLeftY;
+                leftObj.radius = FLIPPER_RADIUS - i / 7;
+
+                const rightObj = objects[1 + FLIPPER_SEGMENTS + i];
+                const prevRightX = rightObj.x;
+                const prevRightY = rightObj.y;
+                rightObj.x = FLIPPER_CENTER + (1) * (FLIPPER_SPREAD - i * Math.cos(flipperRight / 2));
+                rightObj.y = FLIPPER_Y_ACTUAL + i * Math.sin(flipperRight / 2);
+                rightObj.vx = rightObj.x - prevRightX;
+                rightObj.vy = rightObj.y - prevRightY;
+                rightObj.radius = FLIPPER_RADIUS - i / 7;
+            }
+
+            // Update shooter
+            const shooterStart = 1 + FLIPPER_SEGMENTS * 2;
+            const SHOOTER_MAX = TABLE_HEIGHT - 10;
+            for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
+                const shooter = objects[shooterStart + i];
+                if (shooter && shooter.isShooter) {
+                    const prevY = shooter.y;
+                    const pullDown = keys.c || keys.space;
+                    shooter.y = Math.min(SHOOTER_MAX + i,
+                        shooter.y + (shooter.vy = pullDown ? 0.05 :
+                        Math.sin(frame) / 99 + (SHOOTER_Y + i - shooter.y) / 19));
+                    shooter.vy = shooter.y - prevY;
+                }
+            }
+
+            // Ball physics
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+            ball.vy += GRAVITY;
+
+            // Check if ball is lost
+            if (ball.y > TABLE_HEIGHT + 50) {
+                if (ballCount > 1) {
+                    ballCount--;
+                    document.getElementById('balls').textContent = ballCount;
+                    playSound('BallDrain');
+                    setupNewBall();
+                } else {
+                    ballCount = 0;
+                    document.getElementById('balls').textContent = ballCount;
+                    playSound('BallDrain');
+                    gameState = STATE_GAME_OVER;
+                    gameOverTimer = 180;
+                    ball.x = -100;
+                    ball.y = -100;
+                    ball.vx = 0;
+                    ball.vy = 0;
+                }
+            }
+
+            // Collision with table objects
+            for (let i = 1; i < objects.length; i++) {
+                const obj = objects[i];
+
+                const dx = ball.x - obj.x;
+                const dy = ball.y - obj.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const minDist = ball.radius + obj.radius;
+
+                if (dist < minDist && dist > 0) {
+                    const relVx = obj.vx - ball.vx;
+                    const relVy = obj.vy - ball.vy;
+                    const dotProduct = relVx * dx + relVy * dy;
+
+                    if (dotProduct > 0 && !(obj.type && !ball.vx)) {
+                        const overlap = minDist - dist;
+                        ball.x += (dx / dist) * overlap;
+                        ball.y += (dy / dist) * overlap;
+
+                        const tangent = dist * dist / (relVy * dx - relVx * dy);
+                        let restitution;
+
+                        if (obj.type === TYPE_BUMPER) {
+                            if (obj.isPopBumper) {
+                                restitution = 1.8;
+                                obj.bounce = 15;
+                                score += 25;
+                                document.getElementById('score').textContent = score;
+                                playRandomSound('PopBumper', 5);
+                                createParticles(obj.x, obj.y, 8, obj.color);
+                            } else if (obj.isSlingshot) {
+                                restitution = 1.6;
+                                playRandomSound('SlingShot', 3);
+                            } else {
+                                restitution = RESTITUTION;
+                            }
+                        } else {
+                            restitution = RESTITUTION;
+                            // Play wall sound occasionally
+                            if (Date.now() - lastWallSoundTime > 100) {
+                                playRandomSound('Wall', 3);
+                                lastWallSoundTime = Date.now();
+                            }
+                        }
+
+                        ball.vx = -ball.vx / tangent + obj.vx * restitution;
+                        ball.vy = ball.vy / tangent + obj.vy * restitution;
+                    }
+                }
+            }
+
+            // Collision with blocks
+            for (const block of blocks) {
+                if (!block.active) continue;
+
+                // Block center
+                const bx = block.x + block.width / 2;
+                const by = block.y + block.height / 2;
+
+                const dx = ball.x - bx;
+                const dy = ball.y - by;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const minDist = ball.radius + BLOCK_RADIUS;
+
+                if (dist < minDist && dist > 0) {
+                    // Collision!
+                    block.active = false;
+                    score += BLOCK_HIT_POINTS;
+                    document.getElementById('score').textContent = score;
+
+                    // Bounce the ball
+                    const overlap = minDist - dist;
+                    ball.x += (dx / dist) * overlap;
+                    ball.y += (dy / dist) * overlap;
+
+                    // Reflect velocity with bounce
+                    const nx = dx / dist;
+                    const ny = dy / dist;
+                    const dot = ball.vx * nx + ball.vy * ny;
+                    ball.vx = (ball.vx - 2 * dot * nx) * BLOCK_RESTITUTION;
+                    ball.vy = (ball.vy - 2 * dot * ny) * BLOCK_RESTITUTION;
+
+                    // Effects
+                    playRandomSound('PopBumper', 5);
+                    createBlockExplosion(bx, by, block.color);
+                }
+            }
+        }
+    }
+
+    // === UPDATE BLOCKS ===
+    function updateBlocks() {
+        // Move blocks down
+        for (const block of blocks) {
+            if (!block.active) continue;
+            block.y += BLOCK_SPEED * wave;  // Speed increases with wave
+
+            // Check if block reached bottom
+            if (block.y > BLOCK_BOTTOM_Y) {
+                block.active = false;
+                score -= BLOCK_PENALTY;
+                if (score < 0) score = 0;
+                document.getElementById('score').textContent = score;
+                createParticles(block.x + block.width / 2, BLOCK_BOTTOM_Y, 10, '#ff0000');
+            }
+        }
+
+        // Remove inactive blocks
+        blocks = blocks.filter(b => b.active);
+
+        // Spawn new blocks periodically
+        spawnTimer++;
+        const spawnRate = Math.max(200, SPAWN_INTERVAL - wave * 30);  // Gets faster with wave
+        if (spawnTimer >= spawnRate) {
+            spawnTimer = 0;
+            spawnBlockGroup();
+
+            // Check for wave increase (every 10 block groups or so)
+            if (frame % (spawnRate * 10) < spawnRate) {
+                wave++;
+                document.getElementById('wave').textContent = wave;
+            }
+        }
+    }
+
+    // === UPDATE PARTICLES ===
+    function updateParticles() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.05;
+            p.life--;
+            if (p.life <= 0) {
+                particles.splice(i, 1);
+            }
+        }
+    }
+
+    // === RENDER ===
+    function render() {
+        ctx.fillStyle = '#0a0a12';
+        ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
+        // Draw table outline
+        ctx.strokeStyle = '#222244';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(5, 5, TABLE_WIDTH - 10, TABLE_HEIGHT - 10);
+
+        // Draw blocks
+        for (const block of blocks) {
+            if (!block.active) continue;
+
+            // Block shadow
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+            ctx.fillRect(block.x + 2, block.y + 2, block.width, block.height);
+
+            // Block body
+            ctx.fillStyle = block.color;
+            ctx.fillRect(block.x, block.y, block.width, block.height);
+
+            // Block highlight
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.fillRect(block.x, block.y, block.width, 3);
+            ctx.fillRect(block.x, block.y, 3, block.height);
+
+            // Block border
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(block.x, block.y, block.width, block.height);
+        }
+
+        // Draw danger zone (where blocks get destroyed)
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(30, BLOCK_BOTTOM_Y);
+        ctx.lineTo(CENTER_X + DOME_RADIUS - 40, BLOCK_BOTTOM_Y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw flippers
+        ctx.strokeStyle = '#ff00ff';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+
+        // Left flipper
+        ctx.beginPath();
+        const leftStart = objects[1];
+        const leftEnd = objects[FLIPPER_SEGMENTS];
+        ctx.moveTo(leftStart.x, leftStart.y);
+        for (let i = 1; i < FLIPPER_SEGMENTS; i++) {
+            ctx.lineTo(objects[1 + i].x, objects[1 + i].y);
+        }
+        ctx.stroke();
+
+        // Right flipper
+        ctx.beginPath();
+        const rightStart = objects[1 + FLIPPER_SEGMENTS];
+        const rightEnd = objects[1 + FLIPPER_SEGMENTS * 2 - 1];
+        ctx.moveTo(rightStart.x, rightStart.y);
+        for (let i = 1; i < FLIPPER_SEGMENTS; i++) {
+            ctx.lineTo(objects[1 + FLIPPER_SEGMENTS + i].x, objects[1 + FLIPPER_SEGMENTS + i].y);
+        }
+        ctx.stroke();
+
+        // Draw pop bumpers
+        for (const bumper of popBumpers) {
+            const pulseRadius = bumper.bounce > 0 ? bumper.radius + 5 : bumper.radius;
+
+            // Glow
+            ctx.beginPath();
+            ctx.arc(bumper.x, bumper.y, pulseRadius + 5, 0, Math.PI * 2);
+            ctx.fillStyle = bumper.color + '33';
+            ctx.fill();
+
+            // Body
+            ctx.beginPath();
+            ctx.arc(bumper.x, bumper.y, pulseRadius, 0, Math.PI * 2);
+            ctx.fillStyle = bumper.color;
+            ctx.fill();
+
+            // Highlight
+            ctx.beginPath();
+            ctx.arc(bumper.x - 3, bumper.y - 3, pulseRadius * 0.4, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.fill();
+
+            if (bumper.bounce > 0) bumper.bounce--;
+        }
+
+        // Draw slingshots (glow effect)
+        for (const obj of objects) {
+            if (obj.isSlingshot) {
+                ctx.beginPath();
+                ctx.arc(obj.x, obj.y, obj.radius + 2, 0, Math.PI * 2);
+                ctx.fillStyle = '#ff880044';
+                ctx.fill();
+            }
+        }
+
+        // Draw center pin
+        for (const obj of objects) {
+            if (obj.isCenterPin) {
+                ctx.beginPath();
+                ctx.arc(obj.x, obj.y, obj.radius, 0, Math.PI * 2);
+                ctx.fillStyle = obj.color;
+                ctx.fill();
+            }
+        }
+
+        // Draw shooter lane
+        ctx.fillStyle = '#333355';
+        ctx.fillRect(SHOOTER_X - 8, SHOOTER_Y - 30, 16, TABLE_HEIGHT - SHOOTER_Y + 40);
+
+        // Draw shooter plunger
+        const shooterStart = 1 + FLIPPER_SEGMENTS * 2;
+        const firstShooter = objects[shooterStart];
+        if (firstShooter) {
+            ctx.fillStyle = '#666688';
+            ctx.fillRect(SHOOTER_X - 6, firstShooter.y, 12, 30);
+            ctx.fillStyle = '#8888aa';
+            ctx.fillRect(SHOOTER_X - 4, firstShooter.y + 2, 8, 5);
+        }
+
+        // Draw ball
+        const ball = objects[0];
+        if (ball.y > -50) {
+            // Ball shadow
+            ctx.beginPath();
+            ctx.arc(ball.x + 2, ball.y + 2, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fill();
+
+            // Ball gradient
+            const gradient = ctx.createRadialGradient(
+                ball.x - 2, ball.y - 2, 0,
+                ball.x, ball.y, ball.radius
+            );
+            gradient.addColorStop(0, '#ffffff');
+            gradient.addColorStop(0.5, '#cccccc');
+            gradient.addColorStop(1, '#888888');
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+        }
+
+        // Draw particles
+        for (const p of particles) {
+            const alpha = Math.min(1, p.life / 30);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.fillStyle = p.color + Math.floor(alpha * 255).toString(16).padStart(2, '0');
+            ctx.fill();
+        }
+
+        // Draw table walls (outline only)
+        ctx.strokeStyle = '#334466';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        // Left side
+        ctx.moveTo(CENTER_X - DOME_RADIUS - WALL_RADIUS, TABLE_HEIGHT);
+        ctx.lineTo(CENTER_X - DOME_RADIUS - WALL_RADIUS, 70);
+        // Top dome
+        ctx.arc(CENTER_X, DOME_RADIUS + WALL_RADIUS, DOME_RADIUS + WALL_RADIUS, Math.PI, 0, false);
+        // Right side (up to shooter lane)
+        ctx.lineTo(CENTER_X + DOME_RADIUS + WALL_RADIUS, 250);
+        ctx.stroke();
+
+        // Game over screen
+        if (gameState === STATE_GAME_OVER) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
+            ctx.fillStyle = '#ff0066';
+            ctx.font = 'bold 40px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', TABLE_WIDTH / 2, TABLE_HEIGHT / 2 - 60);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 30px Arial';
+            ctx.fillText('SCORE: ' + score, TABLE_WIDTH / 2, TABLE_HEIGHT / 2);
+
+            ctx.fillStyle = '#ffff00';
+            ctx.font = '20px Arial';
+            ctx.fillText('WAVE: ' + wave, TABLE_WIDTH / 2, TABLE_HEIGHT / 2 + 40);
+
+            ctx.fillStyle = '#00ffff';
+            ctx.font = '18px Arial';
+            ctx.fillText('Press SPACE to restart', TABLE_WIDTH / 2, TABLE_HEIGHT / 2 + 100);
+        }
+    }
+
+    // === MAIN LOOP ===
+    function gameLoop() {
+        frame++;
+
+        if (gameState === STATE_PLAYING && gameStarted) {
+            updatePhysics();
+            updateBlocks();
+        }
+
+        updateParticles();
+        render();
+
+        // Check for game restart
+        if (gameState === STATE_GAME_OVER && gameOverTimer > 0) {
+            gameOverTimer--;
+        }
+        if (gameState === STATE_GAME_OVER && gameOverTimer <= 0 && keys.space) {
+            resetGame();
+        }
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    // === INPUT HANDLING ===
+    function handleKeyDown(e) {
+        if (!audioInitialized) initAudio();
+
+        if (e.key === 'z' || e.key === 'Z') {
+            keys.z = true;
+            if (!gameStarted) {
+                gameStarted = true;
+                document.getElementById('instructions').classList.add('hidden');
+            }
+            playRandomSound('Flipper', 3);
+        }
+        if (e.key === 'x' || e.key === 'X' || e.key === '/' || e.key === '.') {
+            keys.x = true;
+            if (!gameStarted) {
+                gameStarted = true;
+                document.getElementById('instructions').classList.add('hidden');
+            }
+            playRandomSound('Flipper', 3);
+        }
+        if (e.key === 'c' || e.key === 'C') keys.c = true;
+        if (e.key === ' ') {
+            keys.space = true;
+            if (!gameStarted) {
+                gameStarted = true;
+                document.getElementById('instructions').classList.add('hidden');
+            }
+        }
+        if (e.key === 'm' || e.key === 'M') {
+            soundMuted = !soundMuted;
+        }
+    }
+
+    function handleKeyUp(e) {
+        if (e.key === 'z' || e.key === 'Z') keys.z = false;
+        if (e.key === 'x' || e.key === 'X' || e.key === '/' || e.key === '.') keys.x = false;
+        if (e.key === 'c' || e.key === 'C') keys.c = false;
+        if (e.key === ' ') keys.space = false;
+    }
+
+    // Touch handling
+    function handleTouchStart(e) {
+        if (!audioInitialized) initAudio();
+
+        for (const touch of e.touches) {
+            const x = touch.clientX;
+            const y = touch.clientY;
+            const screenMiddle = window.innerWidth / 2;
+
+            if (!gameStarted) {
+                gameStarted = true;
+                document.getElementById('instructions').classList.add('hidden');
+            }
+
+            if (x < screenMiddle) {
+                keys.z = true;
+                playRandomSound('Flipper', 3);
+            } else {
+                keys.x = true;
+                playRandomSound('Flipper', 3);
+            }
+
+            // Check for swipe down (plunger)
+            if (y > window.innerHeight * 0.7) {
+                keys.space = true;
+            }
+        }
+        e.preventDefault();
+    }
+
+    function handleTouchEnd(e) {
+        keys.z = false;
+        keys.x = false;
+        keys.space = false;
+    }
+
+    // === RESIZE ===
+    function resize() {
+        const windowWidth = window.innerWidth;
+        const windowHeight = window.innerHeight;
+
+        scale = Math.min(windowWidth / TABLE_WIDTH, windowHeight / TABLE_HEIGHT);
+        canvas.width = TABLE_WIDTH * scale;
+        canvas.height = TABLE_HEIGHT * scale;
+
+        offsetX = (windowWidth - canvas.width) / 2;
+        offsetY = (windowHeight - canvas.height) / 2;
+
+        canvas.style.position = 'absolute';
+        canvas.style.left = offsetX + 'px';
+        canvas.style.top = offsetY + 'px';
+
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    }
+
+    // === INIT ===
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('resize', resize);
+
+    resize();
+    buildTable();
+    gameLoop();
+    </script>
+</body>
+</html>
