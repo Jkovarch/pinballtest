@@ -964,7 +964,8 @@
         }
 
         for (let i = 0; i < 4; i++) {
-            createObject(TOP_LANE_PINS[i], TOP_LANE_Y, TYPE_WALL, 5);
+            const pin = createObject(TOP_LANE_PINS[i], TOP_LANE_Y, TYPE_WALL, 5);
+            pin.isTopLanePin = true;  // Flag to render this pin
         }
 
         const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
@@ -1080,7 +1081,8 @@
 
         // Top lane pins (same position)
         for (let i = 0; i < 4; i++) {
-            createObject(TOP_LANE_PINS[i], TOP_LANE_Y, TYPE_WALL, 5);
+            const pin = createObject(TOP_LANE_PINS[i], TOP_LANE_Y, TYPE_WALL, 5);
+            pin.isTopLanePin = true;  // Flag to render this pin
         }
 
         // Shooter wall
@@ -3120,6 +3122,9 @@
             if (obj.isSpinner) continue;
             if (obj.isScoop) continue;
             if (obj.isRampWall) continue;  // Walls handled by drawSmoothWalls
+            // Skip all regular wall objects - they're rendered by drawSmoothWalls()
+            // Keep center pin and top lane pins visible
+            if (obj.type === TYPE_WALL && !obj.isCenterPin && !obj.isTopLanePin && obj.radius <= 6) continue;
 
             // These are decorative pins (center pin, top lane pins, etc.)
             if (obj.isCenterPin) {
