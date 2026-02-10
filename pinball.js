@@ -873,12 +873,15 @@ function draw() {
     drawSlingshot(slingshots.left, true);
     drawSlingshot(slingshots.right, false);
 
-    // Draw flippers
+    // Draw lane guides (collision helper visuals - drawn before flippers)
+    drawLaneGuides(playableWidth, h);
+
+    // Draw flippers (after lane guides so they're on top)
     drawFlipper(flippers.left, true);
     drawFlipper(flippers.right, false);
 
-    // Draw lane guides
-    drawLaneGuides(playableWidth, h);
+    // Draw solid boundary lines overlay (visual-only layer for clean table edges)
+    drawTableBoundaryOverlay(playableWidth, h);
 
     // Draw ball
     if (ball.active) {
@@ -921,18 +924,10 @@ function drawPlayfield(playableWidth, h) {
     // === CURVED TOP ===
     const curveRadius = playableWidth * 0.6;
     const curveCenterY = curveRadius + 25;
-
-    // Draw the curved top wall
-    ctx.strokeStyle = '#4ecdc4';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    // Arc from left side across the top to right side
     const startAngle = Math.PI + Math.asin((curveCenterY - 5) / curveRadius);
     const endAngle = -Math.asin((curveCenterY - 5) / curveRadius);
-    ctx.arc(centerX, curveCenterY, curveRadius, startAngle, endAngle);
-    ctx.stroke();
 
-    // Fill above the curve (outside playfield)
+    // Fill above the curve (outside playfield) - this masks the area outside the play area
     ctx.fillStyle = '#0a0a1a';
     ctx.beginPath();
     ctx.moveTo(0, 0);
@@ -943,21 +938,7 @@ function drawPlayfield(playableWidth, h) {
     ctx.closePath();
     ctx.fill();
 
-    // Side walls (below the curve)
-    ctx.strokeStyle = '#4ecdc4';
-    ctx.lineWidth = 4;
-
-    // Left wall
-    ctx.beginPath();
-    ctx.moveTo(5, h * 0.10);
-    ctx.lineTo(5, h);
-    ctx.stroke();
-
-    // Right wall (up to plunger lane)
-    ctx.beginPath();
-    ctx.moveTo(playableWidth - 3, h * 0.10);
-    ctx.lineTo(playableWidth - 3, h);
-    ctx.stroke();
+    // Note: Wall lines are now drawn by drawTableBoundaryOverlay() for cleaner visuals
 }
 
 function drawPlungerLane(w, h, playableWidth) {
@@ -1227,63 +1208,9 @@ function drawFlipper(flipper, isLeft) {
 function drawLaneGuides(playableWidth, h) {
     const flipperY = flippers.left.y;
     const outlaneWidth = laneGuides.outlaneWidth || 18;
-    const slingshotTopY = laneGuides.slingshotTopY || (flipperY - 105);
-    const slingshotBottomY = laneGuides.slingshotBottomY || (flipperY - 50);
-    const guideStartY = h * 0.45;
 
-    ctx.strokeStyle = '#4ecdc4';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-
-    // === BALL GUIDE WALLS (from mid-field toward slingshot area) ===
-    // These guide the ball toward the slingshots
-
-    // Left guide wall - curves from outer edge toward the slingshot apex
-    ctx.beginPath();
-    ctx.moveTo(8, guideStartY);
-    ctx.lineTo(slingshots.left.points[2].x, slingshotTopY - 5); // toward apex
-    ctx.stroke();
-
-    // Right guide wall
-    ctx.beginPath();
-    ctx.moveTo(playableWidth - 8, guideStartY);
-    ctx.lineTo(slingshots.right.points[2].x, slingshotTopY - 5);
-    ctx.stroke();
-
-    // === OUTLANE CHANNEL WALLS ===
-    // Narrow outlane passages between the outer wall and the slingshot apex
-
-    // Left outlane - runs from above slingshot down to drain area
-    // The slingshot apex (points[2]) is near the wall, outlane is between wall and apex
-    ctx.beginPath();
-    ctx.moveTo(outlaneWidth, slingshotTopY - 5);
-    ctx.lineTo(outlaneWidth, flipperY + 15);
-    ctx.stroke();
-
-    // Right outlane
-    ctx.beginPath();
-    ctx.moveTo(playableWidth - outlaneWidth, slingshotTopY - 5);
-    ctx.lineTo(playableWidth - outlaneWidth, flipperY + 15);
-    ctx.stroke();
-
-    // === INLANE WALLS (from bottom of rubber band to flippers) ===
-    // Guide ball from slingshot rubber band edge down to flippers
-
-    // Left inlane - from bottom of rubber band (points[1]) toward flipper
-    if (slingshots.left.points.length >= 3) {
-        ctx.beginPath();
-        ctx.moveTo(slingshots.left.points[1].x, slingshots.left.points[1].y);
-        ctx.lineTo(flippers.left.x - 5, flipperY + 5);
-        ctx.stroke();
-    }
-
-    // Right inlane
-    if (slingshots.right.points.length >= 3) {
-        ctx.beginPath();
-        ctx.moveTo(slingshots.right.points[1].x, slingshots.right.points[1].y);
-        ctx.lineTo(flippers.right.x + 5, flipperY + 5);
-        ctx.stroke();
-    }
+    // Note: The solid wall lines are now drawn by drawTableBoundaryOverlay()
+    // This function only draws labels and area highlights
 
     // === DRAIN AREA ===
     ctx.fillStyle = 'rgba(231, 76, 60, 0.25)';
@@ -1309,6 +1236,151 @@ function drawLaneGuides(playableWidth, h) {
     ctx.translate(playableWidth - outlaneWidth / 2, flipperY - 30);
     ctx.rotate(Math.PI / 2);
     ctx.fillText('OUT', 0, 0);
+    ctx.restore();
+}
+
+function drawTableBoundaryOverlay(playableWidth, h) {
+    // This is a visual-only overlay that draws clean solid lines
+    // for all table boundaries on top of other elements
+    const centerX = playableWidth / 2;
+    const flipperY = flippers.left.y;
+    const outlaneWidth = laneGuides.outlaneWidth || 18;
+    const slingshotTopY = laneGuides.slingshotTopY || (flipperY - 105);
+    const slingshotBottomY = laneGuides.slingshotBottomY || (flipperY - 50);
+    const guideStartY = h * 0.45;
+
+    // === CURVED TOP - solid arc ===
+    const curveRadius = playableWidth * 0.6;
+    const curveCenterY = curveRadius + 25;
+
+    ctx.strokeStyle = '#4ecdc4';
+    ctx.lineWidth = 5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Draw the curved top as a solid line
+    ctx.beginPath();
+    const startAngle = Math.PI + Math.asin((curveCenterY - 5) / curveRadius);
+    const endAngle = -Math.asin((curveCenterY - 5) / curveRadius);
+    ctx.arc(centerX, curveCenterY, curveRadius, startAngle, endAngle);
+    ctx.stroke();
+
+    // === OUTER WALLS - left and right boundaries ===
+    // Left outer wall - solid line from curve down to bottom
+    ctx.beginPath();
+    ctx.moveTo(5, h * 0.08);
+    ctx.lineTo(5, h + 10);
+    ctx.stroke();
+
+    // Right outer wall (playfield boundary)
+    ctx.beginPath();
+    ctx.moveTo(playableWidth - 3, h * 0.08);
+    ctx.lineTo(playableWidth - 3, h + 10);
+    ctx.stroke();
+
+    // === OUTLANE CHANNEL INNER WALLS - solid lines ===
+    // These separate the outlanes from the inlanes
+
+    // Left outlane inner wall
+    ctx.beginPath();
+    ctx.moveTo(outlaneWidth, slingshotTopY - 5);
+    ctx.lineTo(outlaneWidth, flipperY + 15);
+    ctx.stroke();
+
+    // Right outlane inner wall
+    ctx.beginPath();
+    ctx.moveTo(playableWidth - outlaneWidth, slingshotTopY - 5);
+    ctx.lineTo(playableWidth - outlaneWidth, flipperY + 15);
+    ctx.stroke();
+
+    // === GUIDE WALLS (angled approach walls) ===
+    // Left guide - from mid-field to slingshot apex
+    ctx.beginPath();
+    ctx.moveTo(8, guideStartY);
+    ctx.lineTo(slingshots.left.points[2].x, slingshotTopY - 5);
+    ctx.stroke();
+
+    // Right guide
+    ctx.beginPath();
+    ctx.moveTo(playableWidth - 8, guideStartY);
+    ctx.lineTo(slingshots.right.points[2].x, slingshotTopY - 5);
+    ctx.stroke();
+
+    // === SLINGSHOT BACK EDGES - solid lines ===
+    // These are the non-active edges of the slingshots (wall-facing edges)
+    ctx.lineWidth = 4;
+
+    // Left slingshot back edges (from apex to top and bottom)
+    if (slingshots.left.points.length >= 3) {
+        const pts = slingshots.left.points;
+        // Top edge (apex to top)
+        ctx.beginPath();
+        ctx.moveTo(pts[2].x, pts[2].y);
+        ctx.lineTo(pts[0].x, pts[0].y);
+        ctx.stroke();
+        // Bottom edge (apex to bottom)
+        ctx.beginPath();
+        ctx.moveTo(pts[2].x, pts[2].y);
+        ctx.lineTo(pts[1].x, pts[1].y);
+        ctx.stroke();
+    }
+
+    // Right slingshot back edges
+    if (slingshots.right.points.length >= 3) {
+        const pts = slingshots.right.points;
+        // Top edge (apex to top)
+        ctx.beginPath();
+        ctx.moveTo(pts[2].x, pts[2].y);
+        ctx.lineTo(pts[0].x, pts[0].y);
+        ctx.stroke();
+        // Bottom edge (apex to bottom)
+        ctx.beginPath();
+        ctx.moveTo(pts[2].x, pts[2].y);
+        ctx.lineTo(pts[1].x, pts[1].y);
+        ctx.stroke();
+    }
+
+    // === INLANE WALLS - from slingshot down to flipper area ===
+    ctx.lineWidth = 5;
+
+    // Left inlane
+    if (slingshots.left.points.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(slingshots.left.points[1].x, slingshots.left.points[1].y);
+        ctx.lineTo(flippers.left.x - 5, flipperY + 5);
+        ctx.stroke();
+    }
+
+    // Right inlane
+    if (slingshots.right.points.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(slingshots.right.points[1].x, slingshots.right.points[1].y);
+        ctx.lineTo(flippers.right.x + 5, flipperY + 5);
+        ctx.stroke();
+    }
+
+    // Add slight glow effect to the main boundaries for visual polish
+    ctx.save();
+    ctx.strokeStyle = 'rgba(78, 205, 196, 0.3)';
+    ctx.lineWidth = 10;
+
+    // Curved top glow
+    ctx.beginPath();
+    ctx.arc(centerX, curveCenterY, curveRadius, startAngle, endAngle);
+    ctx.stroke();
+
+    // Left wall glow
+    ctx.beginPath();
+    ctx.moveTo(5, h * 0.08);
+    ctx.lineTo(5, h + 10);
+    ctx.stroke();
+
+    // Right wall glow
+    ctx.beginPath();
+    ctx.moveTo(playableWidth - 3, h * 0.08);
+    ctx.lineTo(playableWidth - 3, h + 10);
+    ctx.stroke();
+
     ctx.restore();
 }
 
