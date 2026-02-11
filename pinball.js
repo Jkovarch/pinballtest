@@ -339,16 +339,20 @@ function handleWallCollisions(w, h, playableWidth) {
 
     // === CURVED TOP SECTION ===
     // The top of the playfield is curved, allowing ball to roll horizontally
-    // Must match the drawing in drawPlayfield()
+    // This curve extends to include the plunger lane exit area for smooth transition
     const curveRadius = playableWidth * 0.6;
     const curveCenterY = curveRadius + 25;
 
-    if (ball.y < h * 0.20) {
+    // Ball is in the upper area - check for curve collision
+    // Extended to cover balls exiting from plunger lane (up to x = w)
+    if (ball.y < h * 0.25) {
         // Check distance from curve center
         const dx = ball.x - centerX;
         const dy = ball.y - curveCenterY;
         const distFromCenter = Math.sqrt(dx * dx + dy * dy);
 
+        // Extended curve collision that wraps around to the plunger lane exit
+        // The curve effectively "catches" the ball as it exits the shooter lane
         if (distFromCenter > curveRadius - ball.radius - 2 && ball.y < curveCenterY) {
             // Ball is hitting the curved top
             const nx = dx / distFromCenter;
@@ -372,46 +376,46 @@ function handleWallCollisions(w, h, playableWidth) {
     }
 
     // === LEFT WALL (outer boundary) ===
-    if (ball.x - ball.radius < 5 && ball.y > h * 0.08) {
+    if (ball.x - ball.radius < 5) {
         ball.x = 5 + ball.radius;
         ball.vx = Math.abs(ball.vx) * physics.bounce;
     }
 
     // === RIGHT WALL (main playfield boundary) ===
-    if (ball.x < plungerLaneLeft && ball.x + ball.radius > plungerLaneLeft - 3 && ball.y > h * 0.06) {
-        ball.x = plungerLaneLeft - 3 - ball.radius;
-        ball.vx = -Math.abs(ball.vx) * physics.bounce;
+    // Only block balls in the main playfield from entering plunger lane
+    // Balls exiting from plunger lane (moving left with x near boundary) can pass through
+    if (ball.x < plungerLaneLeft && ball.x + ball.radius > plungerLaneLeft - 3 && ball.y > h * 0.12) {
+        // Only bounce if ball is moving toward the plunger lane
+        if (ball.vx > 0) {
+            ball.x = plungerLaneLeft - 3 - ball.radius;
+            ball.vx = -Math.abs(ball.vx) * physics.bounce;
+        }
     }
 
     // === PLUNGER LANE ===
-    if (ball.x > plungerLaneLeft - 10) {
-        // Curved entrance at top of plunger lane
-        if (ball.y < h * 0.08) {
-            const entryCurveX = plungerLaneLeft + plunger.width / 2;
-            const entryCurveY = h * 0.05;
-            const entryCurveR = plunger.width / 2 + 5;
-
-            const edx = ball.x - entryCurveX;
-            const edy = ball.y - entryCurveY;
-            const eDist = Math.sqrt(edx * edx + edy * edy);
-
-            if (eDist < entryCurveR + ball.radius && ball.x > plungerLaneLeft) {
-                const enx = edx / eDist;
-                const eny = edy / eDist;
-                ball.x = entryCurveX + enx * (entryCurveR + ball.radius);
-                ball.y = entryCurveY + eny * (entryCurveR + ball.radius);
-                const eDot = ball.vx * enx + ball.vy * eny;
-                ball.vx -= 1.5 * eDot * enx;
-                ball.vy -= 1.5 * eDot * eny;
-            }
-        }
-
-        // Plunger lane walls
-        if (ball.x > plungerLaneLeft && ball.y > h * 0.08) {
+    // The plunger lane has walls on left and right, but is OPEN at the top
+    // to allow the ball to exit into the curved top of the playfield
+    if (ball.x > plungerLaneLeft) {
+        // Only constrain ball in lower part of plunger lane
+        // At the top, ball is free to exit via the curve
+        if (ball.y > h * 0.12) {
+            // Left wall of plunger lane
             if (ball.x - ball.radius < plungerLaneLeft + 2) {
                 ball.x = plungerLaneLeft + 2 + ball.radius;
                 ball.vx = Math.abs(ball.vx) * physics.bounce;
             }
+            // Right wall of plunger lane
+            if (ball.x + ball.radius > w - 2) {
+                ball.x = w - 2 - ball.radius;
+                ball.vx = -Math.abs(ball.vx) * physics.bounce;
+            }
+        } else {
+            // Near the top - guide ball toward main playfield
+            // Apply gentle leftward force to help ball exit
+            if (ball.vy < 0) { // Ball is still moving up
+                ball.vx -= 0.3; // Drift left toward playfield
+            }
+            // Right wall still active at top to prevent ball escaping right
             if (ball.x + ball.radius > w - 2) {
                 ball.x = w - 2 - ball.radius;
                 ball.vx = -Math.abs(ball.vx) * physics.bounce;
@@ -835,9 +839,10 @@ function launchBall() {
     ball.x = plunger.x;
     ball.y = h - 60;
 
-    // Strong launch to reach top of table
-    ball.vx = -3 - Math.random() * 2;
-    ball.vy = -28 - Math.random() * 5; // Much stronger launch
+    // Launch ball up the shooter lane
+    // The leftward velocity helps guide it into the playfield at the top
+    ball.vx = -2 - Math.random() * 1.5;
+    ball.vy = -22 - Math.random() * 4; // Strong enough to reach the curve
     ball.active = true;
 }
 
@@ -944,22 +949,31 @@ function drawPlayfield(playableWidth, h) {
 function drawPlungerLane(w, h, playableWidth) {
     // Plunger lane background
     ctx.fillStyle = 'rgba(40, 40, 60, 0.8)';
-    ctx.fillRect(playableWidth, 0, plunger.width, h);
+    ctx.fillRect(playableWidth, h * 0.10, plunger.width, h);
 
-    // Lane border
+    // Lane left border (starts below the curve exit point)
     ctx.strokeStyle = '#4ecdc4';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(playableWidth, 0);
+    ctx.moveTo(playableWidth, h * 0.12);
     ctx.lineTo(playableWidth, h);
     ctx.stroke();
 
-    // Curved top entrance
+    // Lane right border
     ctx.beginPath();
-    ctx.arc(playableWidth + plunger.width / 2, 25, plunger.width / 2 - 5, Math.PI, 0);
-    ctx.strokeStyle = '#4ecdc4';
-    ctx.lineWidth = 3;
+    ctx.moveTo(w - 2, h * 0.06);
+    ctx.lineTo(w - 2, h);
     ctx.stroke();
+
+    // Open exit indicator at top - shows where ball exits to playfield
+    ctx.strokeStyle = 'rgba(78, 205, 196, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(playableWidth, h * 0.12);
+    ctx.quadraticCurveTo(playableWidth + plunger.width / 3, h * 0.06, w - 5, h * 0.06);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
     // Plunger mechanism
     if (!gameState.ballInPlay) {
