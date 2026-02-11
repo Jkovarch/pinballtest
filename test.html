@@ -184,7 +184,7 @@
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
 
-    // === CONSTANTS ===
+    // === CONSTANTS (from original index.html) ===
     const TABLE_WIDTH = 400;
     const TABLE_HEIGHT = 700;
     const CENTER_X = TABLE_WIDTH / 2 - 20;
@@ -210,36 +210,26 @@
 
     // Block/Tetris settings
     const BLOCK_SIZE = 20;
-    const BLOCK_RADIUS = 12;  // Collision radius for blocks
-    const BLOCK_SPAWN_Y = 60;  // Where blocks spawn
-    const BLOCK_BOTTOM_Y = FLIPPER_Y - 80;  // Where blocks get destroyed
-    const BLOCK_SPEED = 0.015;  // How fast blocks descend (pixels per frame)
-    const SPAWN_INTERVAL = 600;  // Frames between spawning new block groups
+    const BLOCK_RADIUS = 12;
+    const BLOCK_SPAWN_Y = 60;
+    const BLOCK_BOTTOM_Y = FLIPPER_Y - 80;
+    const BLOCK_SPEED = 0.015;
+    const SPAWN_INTERVAL = 600;
     const BLOCK_HIT_POINTS = 100;
     const BLOCK_PENALTY = 1000;
 
     // Tetris-like shapes (relative positions)
     const BLOCK_SHAPES = [
-        // I piece
-        [[0, 0], [1, 0], [2, 0], [3, 0]],
-        // O piece
-        [[0, 0], [1, 0], [0, 1], [1, 1]],
-        // T piece
-        [[0, 0], [1, 0], [2, 0], [1, 1]],
-        // L piece
-        [[0, 0], [0, 1], [0, 2], [1, 2]],
-        // J piece
-        [[1, 0], [1, 1], [1, 2], [0, 2]],
-        // S piece
-        [[1, 0], [2, 0], [0, 1], [1, 1]],
-        // Z piece
-        [[0, 0], [1, 0], [1, 1], [2, 1]],
-        // Small bar
-        [[0, 0], [1, 0]],
-        // Single block
-        [[0, 0]],
-        // Plus shape
-        [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2]]
+        [[0, 0], [1, 0], [2, 0], [3, 0]],  // I piece
+        [[0, 0], [1, 0], [0, 1], [1, 1]],  // O piece
+        [[0, 0], [1, 0], [2, 0], [1, 1]],  // T piece
+        [[0, 0], [0, 1], [0, 2], [1, 2]],  // L piece
+        [[1, 0], [1, 1], [1, 2], [0, 2]],  // J piece
+        [[1, 0], [2, 0], [0, 1], [1, 1]],  // S piece
+        [[0, 0], [1, 0], [1, 1], [2, 1]],  // Z piece
+        [[0, 0], [1, 0]],                   // Small bar
+        [[0, 0]],                           // Single block
+        [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2]]  // Plus shape
     ];
 
     const BLOCK_COLORS = [
@@ -253,7 +243,7 @@
 
     // === GAME STATE ===
     let objects = [];
-    let blocks = [];  // Active breakout blocks
+    let blocks = [];
     let score = 0;
     let ballCount = 3;
     let wave = 1;
@@ -272,9 +262,6 @@
 
     let particles = [];
     let lastWallSoundTime = 0;
-
-    // Pop bumpers above outlanes (like original game)
-    let popBumpers = [];
 
     // === PARTICLES ===
     function createParticles(x, y, count, color) {
@@ -334,7 +321,7 @@
         const maxSpawnX = CENTER_X + DOME_RADIUS - 80 - (maxX * BLOCK_SIZE);
         const startX = minSpawnX + Math.random() * (maxSpawnX - minSpawnX);
 
-        const groupId = Date.now() + Math.random();  // Unique group identifier
+        const groupId = Date.now() + Math.random();
 
         for (const [bx, by] of shape) {
             blocks.push({
@@ -350,19 +337,18 @@
         }
     }
 
-    // === BUILD TABLE ===
+    // === BUILD TABLE (from original index.html) ===
     function buildTable() {
         objects = [];
         blocks = [];
-        popBumpers = [];
 
-        // Create ball
+        // Create ball in shooter lane
         const ball = createObject(SHOOTER_X, SHOOTER_Y - 20);
         ball.radius = BALL_RADIUS;
         ball.color = '#ffffff';
         ball.isBall = true;
 
-        // Create flipper segments
+        // Create flipper segments (left and right)
         for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
             createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
             createObject(0, 0, TYPE_WALL, FLIPPER_RADIUS - i / 6);
@@ -370,7 +356,7 @@
 
         // Create shooter lane segments
         for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
-            const shooter = createObject(CENTER_X + DOME_RADIUS - BALL_RADIUS, TABLE_HEIGHT - 10 + i, TYPE_WALL, 5);
+            const shooter = createObject(SHOOTER_X, TABLE_HEIGHT - 10 + i, TYPE_WALL, 5);
             shooter.isShooter = true;
             shooter.shooterIndex = i;
         }
@@ -382,7 +368,7 @@
         centerPin.isCenterPin = true;
         centerPin.color = '#00ffff';
 
-        // Build both sides
+        // Build both sides (walls, outlanes, slingshots)
         for (let side = 0; side < 2; side++) {
             const dir = side * 2 - 1;
 
@@ -399,11 +385,12 @@
                 );
             }
 
-            // Outlane walls
+            // Outlane walls (vertical part)
             for (let i = 0; i < 12; i++) {
                 createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50 - i * 7);
             }
 
+            // Outlane walls (diagonal part connecting to slingshot area)
             for (let i = 0; i < 19; i++) {
                 createObject(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55 - i * 3), FLIPPER_Y - 50 + i * 3);
             }
@@ -415,11 +402,13 @@
             const slingBottomY = FLIPPER_Y - 70;
             const slingBottomInnerY = slingBottomY + 25;
 
+            // Slingshot outer wall
             for (let i = 0; i <= 7; i++) {
                 const t = i / 7;
                 createObject(slingOuterX, slingTopY + t * (slingBottomY - slingTopY));
             }
 
+            // Slingshot diagonal (active bumper surface)
             for (let i = 0; i <= 12; i++) {
                 const t = i / 12;
                 const sObj = createObject(
@@ -430,6 +419,7 @@
                 sObj.isSlingshot = true;
             }
 
+            // Slingshot bottom connector
             for (let i = 0; i <= 5; i++) {
                 const t = i / 5;
                 createObject(
@@ -437,15 +427,9 @@
                     slingBottomY + (slingBottomInnerY - slingBottomY) * t
                 );
             }
-
-            // Pop bumpers above outlanes
-            const bumper = createObject(FLIPPER_CENTER + dir * 130, 470, TYPE_BUMPER, 15);
-            bumper.isPopBumper = true;
-            bumper.color = dir < 0 ? '#ff00ff' : '#00ff88';
-            popBumpers.push(bumper);
         }
 
-        // Shooter wall
+        // Shooter lane wall (separates shooter from main playfield)
         const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
         for (let i = 0; i < 65; i++) {
             createObject(shooterWallX, TABLE_HEIGHT - 7 * i);
@@ -530,7 +514,7 @@
                 rightObj.radius = FLIPPER_RADIUS - i / 7;
             }
 
-            // Update shooter
+            // Update shooter (pull back with C or SPACE, release to launch)
             const shooterStart = 1 + FLIPPER_SEGMENTS * 2;
             const SHOOTER_MAX = TABLE_HEIGHT - 10;
             for (let i = 0; i < FLIPPER_SEGMENTS; i++) {
@@ -550,7 +534,7 @@
             ball.y += ball.vy;
             ball.vy += GRAVITY;
 
-            // Check if ball is lost
+            // Check if ball is lost (fell below table)
             if (ball.y > TABLE_HEIGHT + 50) {
                 if (ballCount > 1) {
                     ballCount--;
@@ -593,14 +577,7 @@
                         let restitution;
 
                         if (obj.type === TYPE_BUMPER) {
-                            if (obj.isPopBumper) {
-                                restitution = 1.8;
-                                obj.bounce = 15;
-                                score += 25;
-                                document.getElementById('score').textContent = score;
-                                playRandomSound('PopBumper', 5);
-                                createParticles(obj.x, obj.y, 8, obj.color);
-                            } else if (obj.isSlingshot) {
+                            if (obj.isSlingshot) {
                                 restitution = 1.6;
                                 playRandomSound('SlingShot', 3);
                             } else {
@@ -608,7 +585,6 @@
                             }
                         } else {
                             restitution = RESTITUTION;
-                            // Play wall sound occasionally
                             if (Date.now() - lastWallSoundTime > 100) {
                                 playRandomSound('Wall', 3);
                                 lastWallSoundTime = Date.now();
@@ -665,7 +641,7 @@
         // Move blocks down
         for (const block of blocks) {
             if (!block.active) continue;
-            block.y += BLOCK_SPEED * wave;  // Speed increases with wave
+            block.y += BLOCK_SPEED * wave;
 
             // Check if block reached bottom
             if (block.y > BLOCK_BOTTOM_Y) {
@@ -682,12 +658,12 @@
 
         // Spawn new blocks periodically
         spawnTimer++;
-        const spawnRate = Math.max(200, SPAWN_INTERVAL - wave * 30);  // Gets faster with wave
+        const spawnRate = Math.max(200, SPAWN_INTERVAL - wave * 30);
         if (spawnTimer >= spawnRate) {
             spawnTimer = 0;
             spawnBlockGroup();
 
-            // Check for wave increase (every 10 block groups or so)
+            // Check for wave increase
             if (frame % (spawnRate * 10) < spawnRate) {
                 wave++;
                 document.getElementById('wave').textContent = wave;
@@ -752,6 +728,76 @@
         ctx.stroke();
         ctx.setLineDash([]);
 
+        // Draw table walls (smooth visual outline)
+        ctx.strokeStyle = '#334466';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        const DOME_BOTH = DOME_RADIUS + WALL_RADIUS;
+
+        // Left side wall
+        ctx.beginPath();
+        ctx.moveTo(CENTER_X - DOME_BOTH, TABLE_HEIGHT);
+        ctx.lineTo(CENTER_X - DOME_BOTH, 70);
+        ctx.stroke();
+
+        // Right side wall (up to shooter lane)
+        ctx.beginPath();
+        ctx.moveTo(CENTER_X + DOME_BOTH, TABLE_HEIGHT);
+        ctx.lineTo(CENTER_X + DOME_BOTH, 70);
+        ctx.stroke();
+
+        // Top dome
+        ctx.beginPath();
+        ctx.arc(CENTER_X, DOME_BOTH, DOME_BOTH, Math.PI, 0, false);
+        ctx.stroke();
+
+        // Draw outlane walls
+        for (let side = 0; side < 2; side++) {
+            const dir = side * 2 - 1;
+
+            // Vertical outlane wall
+            ctx.beginPath();
+            ctx.moveTo(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50);
+            ctx.lineTo(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50 - 11 * 7);
+            ctx.stroke();
+
+            // Diagonal outlane wall
+            ctx.beginPath();
+            ctx.moveTo(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55), FLIPPER_Y - 50);
+            ctx.lineTo(FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 55 - 18 * 3), FLIPPER_Y - 50 + 18 * 3);
+            ctx.stroke();
+        }
+
+        // Draw slingshot areas
+        for (let side = 0; side < 2; side++) {
+            const dir = side * 2 - 1;
+            const slingInnerX = FLIPPER_CENTER + dir * FLIPPER_SPREAD;
+            const slingOuterX = FLIPPER_CENTER + dir * (FLIPPER_SPREAD + 25);
+            const slingTopY = FLIPPER_Y - 120;
+            const slingBottomY = FLIPPER_Y - 70;
+            const slingBottomInnerY = slingBottomY + 25;
+
+            // Slingshot outline
+            ctx.strokeStyle = '#ff8800';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(slingOuterX, slingTopY);
+            ctx.lineTo(slingOuterX, slingBottomY);
+            ctx.lineTo(slingInnerX, slingBottomInnerY);
+            ctx.lineTo(slingOuterX, slingTopY);
+            ctx.stroke();
+
+            // Glow effect
+            ctx.strokeStyle = '#ff880044';
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(slingOuterX, slingTopY);
+            ctx.lineTo(slingInnerX, slingBottomInnerY);
+            ctx.stroke();
+        }
+
         // Draw flippers
         ctx.strokeStyle = '#ff00ff';
         ctx.lineWidth = 3;
@@ -760,7 +806,6 @@
         // Left flipper
         ctx.beginPath();
         const leftStart = objects[1];
-        const leftEnd = objects[FLIPPER_SEGMENTS];
         ctx.moveTo(leftStart.x, leftStart.y);
         for (let i = 1; i < FLIPPER_SEGMENTS; i++) {
             ctx.lineTo(objects[1 + i].x, objects[1 + i].y);
@@ -770,47 +815,11 @@
         // Right flipper
         ctx.beginPath();
         const rightStart = objects[1 + FLIPPER_SEGMENTS];
-        const rightEnd = objects[1 + FLIPPER_SEGMENTS * 2 - 1];
         ctx.moveTo(rightStart.x, rightStart.y);
         for (let i = 1; i < FLIPPER_SEGMENTS; i++) {
             ctx.lineTo(objects[1 + FLIPPER_SEGMENTS + i].x, objects[1 + FLIPPER_SEGMENTS + i].y);
         }
         ctx.stroke();
-
-        // Draw pop bumpers
-        for (const bumper of popBumpers) {
-            const pulseRadius = bumper.bounce > 0 ? bumper.radius + 5 : bumper.radius;
-
-            // Glow
-            ctx.beginPath();
-            ctx.arc(bumper.x, bumper.y, pulseRadius + 5, 0, Math.PI * 2);
-            ctx.fillStyle = bumper.color + '33';
-            ctx.fill();
-
-            // Body
-            ctx.beginPath();
-            ctx.arc(bumper.x, bumper.y, pulseRadius, 0, Math.PI * 2);
-            ctx.fillStyle = bumper.color;
-            ctx.fill();
-
-            // Highlight
-            ctx.beginPath();
-            ctx.arc(bumper.x - 3, bumper.y - 3, pulseRadius * 0.4, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-            ctx.fill();
-
-            if (bumper.bounce > 0) bumper.bounce--;
-        }
-
-        // Draw slingshots (glow effect)
-        for (const obj of objects) {
-            if (obj.isSlingshot) {
-                ctx.beginPath();
-                ctx.arc(obj.x, obj.y, obj.radius + 2, 0, Math.PI * 2);
-                ctx.fillStyle = '#ff880044';
-                ctx.fill();
-            }
-        }
 
         // Draw center pin
         for (const obj of objects) {
@@ -825,6 +834,15 @@
         // Draw shooter lane
         ctx.fillStyle = '#333355';
         ctx.fillRect(SHOOTER_X - 8, SHOOTER_Y - 30, 16, TABLE_HEIGHT - SHOOTER_Y + 40);
+
+        // Draw shooter lane wall
+        const shooterWallX = CENTER_X + DOME_RADIUS - BALL_RADIUS * 2 - WALL_RADIUS;
+        ctx.strokeStyle = '#334466';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(shooterWallX, TABLE_HEIGHT);
+        ctx.lineTo(shooterWallX, TABLE_HEIGHT - 65 * 7);
+        ctx.stroke();
 
         // Draw shooter plunger
         const shooterStart = 1 + FLIPPER_SEGMENTS * 2;
@@ -867,19 +885,6 @@
             ctx.fillStyle = p.color + Math.floor(alpha * 255).toString(16).padStart(2, '0');
             ctx.fill();
         }
-
-        // Draw table walls (outline only)
-        ctx.strokeStyle = '#334466';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        // Left side
-        ctx.moveTo(CENTER_X - DOME_RADIUS - WALL_RADIUS, TABLE_HEIGHT);
-        ctx.lineTo(CENTER_X - DOME_RADIUS - WALL_RADIUS, 70);
-        // Top dome
-        ctx.arc(CENTER_X, DOME_RADIUS + WALL_RADIUS, DOME_RADIUS + WALL_RADIUS, Math.PI, 0, false);
-        // Right side (up to shooter lane)
-        ctx.lineTo(CENTER_X + DOME_RADIUS + WALL_RADIUS, 250);
-        ctx.stroke();
 
         // Game over screen
         if (gameState === STATE_GAME_OVER) {
