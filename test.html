@@ -121,7 +121,7 @@
         <p>Hit blocks to score points - Don't let them reach the flippers!</p>
         <p><span class="key">Z</span> Left Flipper <span class="key">/</span> Right Flipper</p>
         <p><span class="key">SPACE</span> or <span class="key">C</span> Launch Ball</p>
-        <p>Blocks reaching bottom: <span style="color:#ff4444">-1000 points</span></p>
+        <p>Blocks reaching bottom: <span style="color:#ff4444">-10 points</span></p>
     </div>
 
     <script>
@@ -214,9 +214,9 @@
     const BLOCK_SPAWN_Y = 60;
     const BLOCK_BOTTOM_Y = FLIPPER_Y - 80;
     const BLOCK_SPEED = 0.015;
-    const SPAWN_INTERVAL = 600;
+    const SPAWN_INTERVAL = 1800;
     const BLOCK_HIT_POINTS = 100;
-    const BLOCK_PENALTY = 1000;
+    const BLOCK_PENALTY = 10;
 
     // Tetris-like shapes (relative positions)
     const BLOCK_SHAPES = [
@@ -304,6 +304,31 @@
         return obj;
     }
 
+    // Minimum vertical gap between block groups
+    const BLOCK_VERTICAL_GAP = 60;
+
+    // Check if a new block group would overlap with existing blocks
+    function wouldOverlap(startX, startY, shape) {
+        for (const [bx, by] of shape) {
+            const newX = startX + bx * BLOCK_SIZE;
+            const newY = startY + by * BLOCK_SIZE;
+
+            for (const block of blocks) {
+                if (!block.active) continue;
+
+                // Check if rectangles overlap with some padding
+                const padding = 10;
+                if (newX < block.x + block.width + padding &&
+                    newX + BLOCK_SIZE > block.x - padding &&
+                    newY < block.y + block.height + BLOCK_VERTICAL_GAP &&
+                    newY + BLOCK_SIZE > block.y - BLOCK_VERTICAL_GAP) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     // === BLOCK GROUP SPAWNING ===
     function spawnBlockGroup() {
         const shapeIndex = Math.floor(Math.random() * BLOCK_SHAPES.length);
@@ -312,21 +337,37 @@
 
         // Calculate shape bounds
         let maxX = 0;
+        let maxY = 0;
         for (const [bx, by] of shape) {
             maxX = Math.max(maxX, bx);
+            maxY = Math.max(maxY, by);
         }
 
         // Random X position within table bounds (avoiding shooter lane)
         const minSpawnX = 50;
         const maxSpawnX = CENTER_X + DOME_RADIUS - 80 - (maxX * BLOCK_SIZE);
-        const startX = minSpawnX + Math.random() * (maxSpawnX - minSpawnX);
+
+        // Try to find a non-overlapping position (max 10 attempts)
+        let attempts = 0;
+        let startX;
+        let spawnY = BLOCK_SPAWN_Y - maxY * BLOCK_SIZE; // Start above visible area
+
+        do {
+            startX = minSpawnX + Math.random() * (maxSpawnX - minSpawnX);
+            attempts++;
+        } while (wouldOverlap(startX, spawnY, shape) && attempts < 10);
+
+        // If we couldn't find a non-overlapping position after 10 attempts, skip spawning
+        if (attempts >= 10 && wouldOverlap(startX, spawnY, shape)) {
+            return;
+        }
 
         const groupId = Date.now() + Math.random();
 
         for (const [bx, by] of shape) {
             blocks.push({
                 x: startX + bx * BLOCK_SIZE,
-                y: BLOCK_SPAWN_Y + by * BLOCK_SIZE,
+                y: spawnY + by * BLOCK_SIZE,
                 width: BLOCK_SIZE - 2,
                 height: BLOCK_SIZE - 2,
                 color: color,
@@ -435,15 +476,26 @@
             createObject(shooterWallX, TABLE_HEIGHT - 7 * i);
         }
 
-        // Spawn initial block groups
-        for (let i = 0; i < 3; i++) {
-            setTimeout(() => spawnBlockGroup(), i * 100);
+        // Cap at top of shooter lane to prevent ball from getting stuck
+        const shooterLaneTopY = TABLE_HEIGHT - 65 * 7;
+        for (let i = 0; i < 8; i++) {
+            // Arc connecting shooter wall to outer wall
+            const angle = Math.PI * (1 - i / 7);
+            const arcRadius = (CENTER_X + DOME_RADIUS - BALL_RADIUS - shooterWallX) / 2;
+            const arcCenterX = shooterWallX + arcRadius;
+            createObject(
+                arcCenterX + Math.cos(angle) * arcRadius,
+                shooterLaneTopY - 5 + Math.sin(angle) * arcRadius * 0.3
+            );
         }
+
+        // Spawn initial block group (just one to start)
+        spawnBlockGroup();
     }
 
     // === RESET GAME ===
     function resetGame() {
-        score = 0;
+        score = 100;
         ballCount = 3;
         wave = 1;
         frame = 0;
@@ -647,9 +699,22 @@
             if (block.y > BLOCK_BOTTOM_Y) {
                 block.active = false;
                 score -= BLOCK_PENALTY;
-                if (score < 0) score = 0;
                 document.getElementById('score').textContent = score;
                 createParticles(block.x + block.width / 2, BLOCK_BOTTOM_Y, 10, '#ff0000');
+
+                // Game over if score reaches 0 or below
+                if (score <= 0) {
+                    score = 0;
+                    document.getElementById('score').textContent = score;
+                    const ball = objects[0];
+                    ball.x = -100;
+                    ball.y = -100;
+                    ball.vx = 0;
+                    ball.vy = 0;
+                    gameState = STATE_GAME_OVER;
+                    gameOverTimer = 180;
+                    playSound('BallDrain');
+                }
             }
         }
 
@@ -658,13 +723,13 @@
 
         // Spawn new blocks periodically
         spawnTimer++;
-        const spawnRate = Math.max(200, SPAWN_INTERVAL - wave * 30);
+        const spawnRate = Math.max(600, SPAWN_INTERVAL - wave * 20);
         if (spawnTimer >= spawnRate) {
             spawnTimer = 0;
             spawnBlockGroup();
 
-            // Check for wave increase
-            if (frame % (spawnRate * 10) < spawnRate) {
+            // Check for wave increase every 5 spawns
+            if (frame % (spawnRate * 5) < spawnRate) {
                 wave++;
                 document.getElementById('wave').textContent = wave;
             }
