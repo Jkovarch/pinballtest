@@ -1183,35 +1183,6 @@
             createObject(SCOOP_X + 20, SCOOP_Y - 30 + i * 4, TYPE_WALL, 3);
         }
 
-        // --- STANDUP TARGET BANKS ---
-        // Left bank (3 targets)
-        for (let i = 0; i < STANDUP_LEFT_POSITIONS.length; i++) {
-            const pos = STANDUP_LEFT_POSITIONS[i];
-            const target = createObject(pos.x, pos.y, TYPE_STANDUP_TARGET, 6);
-            target.isStandupTarget = true;
-            target.standupBank = 'left';
-            target.standupIndex = i;
-            target.color = standupBankLeft[i] ? '#00ff00' : '#006600';
-            table2StandupTargetsLeft.push(target);
-        }
-
-        // Right bank (3 targets)
-        for (let i = 0; i < STANDUP_RIGHT_POSITIONS.length; i++) {
-            const pos = STANDUP_RIGHT_POSITIONS[i];
-            const target = createObject(pos.x, pos.y, TYPE_STANDUP_TARGET, 6);
-            target.isStandupTarget = true;
-            target.standupBank = 'right';
-            target.standupIndex = i;
-            target.color = standupBankRight[i] ? '#00ff00' : '#006600';
-            table2StandupTargetsRight.push(target);
-        }
-
-        // Add some guide rails near standup targets
-        for (let i = 0; i < 5; i++) {
-            createObject(65, 410 + i * 20, TYPE_WALL, 3);
-            createObject(275, 410 + i * 20, TYPE_WALL, 3);
-        }
-
         // Small pop bumpers above outlanes (same as Table 1)
         const smallBumperLeft = createObject(FLIPPER_CENTER - 130, 470, TYPE_BUMPER, 12);
         smallBumperLeft.color = '#ff8800';
@@ -2740,8 +2711,8 @@
             const isLeft = side === 0;
             const isPressed = isLeft ? keys.z : keys.x;
             const flipperAngle = isLeft ? flipperLeft : flipperRight;
-            const baseColor = isLeft ? '#ff0080' : '#0080ff';
-            const activeColor = isLeft ? '#ff00ff' : '#00ffff';
+            const baseColor = '#ff0080';  // Both flippers use same pink color
+            const activeColor = '#ff00ff';  // Both flippers use same magenta when active
             const color = isPressed ? activeColor : baseColor;
 
             // Collect flipper segment positions
@@ -3278,6 +3249,26 @@
 
         // === TABLE 2 SPECIFIC RENDERING ===
         if (currentTable === 2) {
+            // Draw semi-transparent pink ramp coverage area for visibility
+            ctx.save();
+            ctx.fillStyle = 'rgba(255, 105, 180, 0.25)';  // Semi-transparent pink
+            ctx.beginPath();
+            // Left edge of ramp area
+            ctx.moveTo(25, 230);
+            ctx.quadraticCurveTo(15, 160, 55, 90);
+            ctx.quadraticCurveTo(100, 60, 130, 90);
+            ctx.lineTo(155, 140);
+            // Right edge of ramp area (return path)
+            ctx.quadraticCurveTo(140, 100, 85, 110);
+            ctx.quadraticCurveTo(45, 170, 65, 230);
+            ctx.closePath();
+            ctx.fill();
+            // Add pink border to show ramp boundary
+            ctx.strokeStyle = 'rgba(255, 105, 180, 0.6)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.restore();
+
             // Draw ramp path guide with glow
             ctx.save();
             if (!rampDropTargetActive) {
@@ -3452,17 +3443,6 @@
                 ctx.fillText('LOCK', SCOOP_X, SCOOP_Y - 22);
                 ctx.restore();
             }
-
-            // Draw standup target bank labels
-            ctx.fillStyle = standupBankLeft.every(t => t) ? '#00ff00' : '#006600';
-            ctx.font = 'bold 9px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('MULT', 50, 405);
-            ctx.fillText('+' + (standupBankLeftCompletions + 1) + 'X', 50, 495);
-
-            ctx.fillStyle = standupBankRight.every(t => t) ? '#00ff00' : '#006600';
-            ctx.fillText('MULT', 290, 405);
-            ctx.fillText('+' + (standupBankRightCompletions + 1) + 'X', 290, 495);
 
             // Multiball ready indicator
             if (multiballReady) {
