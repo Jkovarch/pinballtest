@@ -18,16 +18,36 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background: #0a0a12;
+            background:
+                radial-gradient(ellipse at 50% 20%, rgba(255, 0, 200, 0.07) 0%, transparent 52%),
+                radial-gradient(ellipse at 50% 80%, rgba(0, 40, 120, 0.28) 0%, transparent 65%),
+                #0a0a12;
             touch-action: none;
             user-select: none;
             -webkit-user-select: none;
             -webkit-touch-callout: none;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 1;
+            background:
+                radial-gradient(ellipse at 40% 35%, rgba(255, 0, 180, 0.08) 0%, transparent 52%),
+                radial-gradient(ellipse at 65% 70%, rgba(0, 80, 200, 0.08) 0%, transparent 45%),
+                radial-gradient(ellipse at 32% 82%, rgba(180, 0, 255, 0.06) 0%, transparent 40%),
+                radial-gradient(ellipse at 70% 20%, rgba(64, 224, 255, 0.05) 0%, transparent 42%);
+            animation: hudNebulaDrift 18s ease-in-out infinite alternate;
         }
 
         #gameCanvas {
             display: block;
             background: #0a0a12;
+            position: relative;
+            z-index: 2;
         }
 
         /* HUD */
@@ -38,17 +58,48 @@
             right: 10px;
             display: flex;
             justify-content: space-between;
-            font-family: 'Arial', sans-serif;
-            color: #fff;
+            font-family: 'Courier New', monospace;
+            color: #ffd8ff;
             z-index: 20;
             pointer-events: none;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
 
         .hud-item {
-            background: rgba(0, 0, 0, 0.5);
+            background:
+                linear-gradient(135deg, rgba(6, 0, 18, 0.95), rgba(36, 4, 52, 0.7)) padding-box,
+                linear-gradient(125deg, rgba(42, 0, 48, 0.9), rgba(255, 0, 204, 0.95), rgba(64, 224, 255, 0.95), rgba(42, 0, 48, 0.9)) border-box;
             padding: 8px 15px;
-            border-radius: 20px;
-            border: 2px solid;
+            border-radius: 12px;
+            border: 2px solid transparent;
+            box-shadow:
+                inset 0 0 16px rgba(0, 0, 0, 0.65),
+                0 0 20px rgba(255, 0, 200, 0.25),
+                0 0 40px rgba(64, 224, 255, 0.14);
+            text-shadow:
+                0 0 10px rgba(255, 0, 220, 0.55),
+                0 0 18px rgba(64, 224, 255, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hud-item::before {
+            content: '';
+            position: absolute;
+            inset: -1px;
+            border-radius: inherit;
+            background:
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(255, 255, 255, 0.03) 2px,
+                    rgba(255, 255, 255, 0.03) 3px
+                );
+            mix-blend-mode: screen;
+            opacity: 0.55;
+            animation: hudScanFlicker 7.5s ease-in-out infinite;
         }
 
         #scoreDisplay {
@@ -57,6 +108,26 @@
 
         #ballDisplay {
             border-color: #00ffff;
+        }
+
+        #hud span {
+            color: #ffffff;
+            font-weight: 700;
+            text-shadow: 0 0 10px rgba(64, 224, 255, 0.65);
+        }
+
+        @keyframes hudNebulaDrift {
+            0% { transform: rotate(0deg) scale(1); opacity: 0.62; }
+            40% { transform: rotate(7deg) scale(1.04); opacity: 0.9; }
+            70% { transform: rotate(-4deg) scale(0.98); opacity: 0.72; }
+            100% { transform: rotate(4deg) scale(1.02); opacity: 0.82; }
+        }
+
+        @keyframes hudScanFlicker {
+            0%, 95%, 100% { opacity: 0.55; }
+            96% { opacity: 0.3; }
+            97% { opacity: 0.62; }
+            98% { opacity: 0.4; }
         }
 
         /* Instructions overlay */
@@ -2450,12 +2521,28 @@
         const time = frame * 0.02;
         gridOffset = (gridOffset + 0.3) % gridSize;
 
+        // Subtle nebula color wash inspired by Deep Space table
+        const nebulaPulse = 0.15 + 0.07 * Math.sin(frame * 0.012);
+        const nebula = ctx.createRadialGradient(
+            TABLE_WIDTH * 0.5, TABLE_HEIGHT * 0.35, TABLE_WIDTH * 0.1,
+            TABLE_WIDTH * 0.5, TABLE_HEIGHT * 0.55, TABLE_HEIGHT * 0.85
+        );
+        nebula.addColorStop(0, `rgba(255, 0, 180, ${nebulaPulse})`);
+        nebula.addColorStop(0.45, 'rgba(90, 0, 150, 0.08)');
+        nebula.addColorStop(0.75, 'rgba(0, 110, 170, 0.08)');
+        nebula.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = nebula;
+        ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
+
         // Draw vertical lines with pulse effect
         for (let x = 0; x <= TABLE_WIDTH; x += gridSize) {
             const pulsePhase = (x / TABLE_WIDTH + time) % 1;
             const brightness = 0.03 + 0.02 * Math.sin(pulsePhase * Math.PI * 2);
 
-            ctx.strokeStyle = `rgba(0, 255, 255, ${brightness})`;
+            const lineColor = x % (gridSize * 2) === 0
+                ? `rgba(255, 0, 200, ${brightness * 0.9})`
+                : `rgba(64, 224, 255, ${brightness})`;
+            ctx.strokeStyle = lineColor;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(x, 0);
@@ -2469,7 +2556,7 @@
             const pulsePos = 1 - (adjustedY / TABLE_HEIGHT);
             const glowIntensity = 0.03 + 0.04 * Math.pow(Math.sin(pulsePos * Math.PI), 2);
 
-            ctx.strokeStyle = `rgba(0, 255, 255, ${glowIntensity})`;
+            ctx.strokeStyle = `rgba(64, 224, 255, ${glowIntensity})`;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(0, y);
@@ -2485,9 +2572,9 @@
 
             if (waveAlpha > 0.01) {
                 const gradient = ctx.createLinearGradient(0, waveY - 20, 0, waveY + 20);
-                gradient.addColorStop(0, 'rgba(0, 255, 255, 0)');
-                gradient.addColorStop(0.5, `rgba(0, 255, 255, ${waveAlpha})`);
-                gradient.addColorStop(1, 'rgba(0, 255, 255, 0)');
+                gradient.addColorStop(0, 'rgba(255, 0, 200, 0)');
+                gradient.addColorStop(0.5, `rgba(255, 0, 200, ${waveAlpha})`);
+                gradient.addColorStop(1, 'rgba(255, 0, 200, 0)');
 
                 ctx.fillStyle = gradient;
                 ctx.fillRect(0, waveY - 20, TABLE_WIDTH, 40);
@@ -2499,6 +2586,7 @@
     function drawBumper3D(x, y, radius, color, isActive) {
         const bounceScale = isActive ? 1.15 : 1;
         const r = radius * bounceScale;
+        const spin = frame * 0.05;
 
         // Outer glow
         ctx.save();
@@ -2511,6 +2599,13 @@
         ctx.beginPath();
         ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
         ctx.fill();
+
+        // Animated outer aura ring
+        ctx.strokeStyle = `rgba(64, 224, 255, ${isActive ? 0.8 : 0.32})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, glowRadius * (0.68 + 0.04 * Math.sin(spin)), spin, spin + Math.PI * 1.65);
+        ctx.stroke();
         ctx.restore();
 
         // Shadow underneath
@@ -2531,6 +2626,22 @@
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
+
+        // Rotating conic sheen to emulate Deep Space bumper animation
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(spin);
+        const sheen = ctx.createConicGradient(0, 0, 0);
+        sheen.addColorStop(0, 'rgba(255, 0, 204, 0.45)');
+        sheen.addColorStop(0.22, 'rgba(64, 224, 255, 0.1)');
+        sheen.addColorStop(0.5, 'rgba(255, 0, 204, 0.25)');
+        sheen.addColorStop(0.78, 'rgba(128, 64, 255, 0.18)');
+        sheen.addColorStop(1, 'rgba(255, 0, 204, 0.45)');
+        ctx.fillStyle = sheen;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.95, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
 
         // Outer ring
         ctx.strokeStyle = darkenColor(color, 30);
