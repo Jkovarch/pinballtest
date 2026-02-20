@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deep Space Pinball — DMD Edition</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: #03010e;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 100vh;
+  padding: 30px 20px 50px;
+  font-family: 'Orbitron', monospace;
+  gap: 0px;
+  overflow-x: hidden;
+}
+
+body::before {
+  content:'';
+  position:fixed;
+  inset:0;
+  background:
+    radial-gradient(ellipse at 50% 20%, rgba(255,0,200,0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 80%, rgba(0,40,120,0.2) 0%, transparent 60%);
+  pointer-events:none;
+}
+
+/* ========================
+   DMD DISPLAY
+======================== */
+.dmd-housing {
+  width: 320px;
+  background: #0a0008;
+  border-radius: 10px 10px 0 0;
+  padding: 10px 12px 0;
+  position: relative;
+  box-shadow:
+    0 0 0 2px #2a0030,
+    0 0 0 4px #ff00cc,
+    0 0 0 6px #2a0030,
+    0 0 30px rgba(255,0,200,0.3),
+    0 0 80px rgba(255,0,200,0.1);
+  z-index: 10;
+}
+
+.dmd-housing::before {
+  content: 'DMD DISPLAY UNIT MK-IV';
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 6px;
+  letter-spacing: 3px;
+  color: rgba(255,0,200,0.4);
+  font-family: 'Share Tech Mono', monospace;
+  white-space: nowrap;
+}
+
+.dmd-screen {
+  width: 100%;
+  height: 90px;
+  background: #080005;
+  border-radius: 4px;
+  border: 1px solid rgba(255,0,200,0.2);
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 20px rgba(0,0,0,0.8),
+    inset 0 0 40px rgba(255,0,200,0.04);
+}
+
+/* dot matrix grid overlay */
+.dmd-screen::before {
+  content:'';
+  position:absolute;
+  inset:0;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.35) 3px, rgba(0,0,0,0.35) 4px),
+    repeating-linear-gradient(90deg, transparent, transparent 3px, rgba(0,0,0,0.35) 3px, rgba(0,0,0,0.35) 4px);
+  z-index: 10;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* scanline flicker */
+.dmd-screen::after {
+  content:'';
+  position:absolute;
+  inset:0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(0,0,0,0.08) 1px,
+    rgba(0,0,0,0.08) 2px
+  );
+  z-index: 11;
+  pointer-events:none;
+  animation: dmdFlicker 8s ease-in-out infinite;
+}
+
+@keyframes dmdFlicker {
+  0%,95%,100% { opacity:1; }
+  96% { opacity:0.85; }
+  97% { opacity:1; }
+  98% { opacity:0.9; }
+}
+
+canvas#dmdCanvas {
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  z-index:1;
+}
+
+.dmd-bottom-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 2px 8px;
+}
+
+.dmd-label {
+  font-size: 7px;
+  letter-spacing: 2px;
+  color: rgba(255,0,200,0.5);
+  font-family: 'Share Tech Mono', monospace;
+}
+
+.dmd-credits {
+  font-size: 7px;
+  letter-spacing: 2px;
+  color: rgba(64,224,255,0.5);
+  font-family: 'Share Tech Mono', monospace;
+}
+
+/* ========================
+   TABLE SHELL
+======================== */
+.pinball-table {
+  width: 300px;
+  height: 560px;
+  position: relative;
+  border-radius: 0 0 30px 30px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 2px #0a0030,
+    0 0 0 4px #ff00cc,
+    0 0 0 5px #0a0030,
+    0 0 0 7px rgba(64,224,255,0.5),
+    0 0 0 9px #0a0030,
+    0 0 50px rgba(255,0,200,0.25),
+    0 0 100px rgba(64,224,255,0.15),
+    0 0 200px rgba(100,0,200,0.1);
+  margin: 0 10px;
+}
+
+/* ========================
+   CANVAS BG
+======================== */
+#bgCanvas {
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  z-index:0;
+}
+
+/* ========================
+   CSS ANIMATION LAYERS
+======================== */
+.nebula {
+  position:absolute;
+  inset:-60px;
+  background:
+    radial-gradient(ellipse at 40% 35%, rgba(255,0,180,0.07) 0%, transparent 50%),
+    radial-gradient(ellipse at 65% 70%, rgba(0,80,200,0.07) 0%, transparent 45%),
+    radial-gradient(ellipse at 30% 80%, rgba(180,0,255,0.05) 0%, transparent 40%),
+    radial-gradient(ellipse at 70% 20%, rgba(64,224,255,0.04) 0%, transparent 40%);
+  animation: nebulaDrift 18s ease-in-out infinite alternate;
+  z-index:1;
+  pointer-events:none;
+}
+@keyframes nebulaDrift {
+  0%   { transform:rotate(0deg) scale(1); opacity:.6; }
+  33%  { transform:rotate(8deg) scale(1.05); opacity:.9; }
+  66%  { transform:rotate(-5deg) scale(.97); opacity:.7; }
+  100% { transform:rotate(4deg) scale(1.02); opacity:.8; }
+}
+
+.warp-grid {
+  position:absolute;
+  inset:0;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 28px, rgba(255,0,200,0.03) 28px, rgba(255,0,200,0.03) 29px),
+    repeating-linear-gradient(90deg, transparent, transparent 28px, rgba(64,224,255,0.03) 28px, rgba(64,224,255,0.03) 29px);
+  animation: gridPulse 4s ease-in-out infinite;
+  z-index:1;
+  pointer-events:none;
+}
+@keyframes gridPulse {
+  0%,100% { opacity:.5; }
+  50% { opacity:1.4; }
+}
+
+.scanline {
+  position:absolute;
+  left:0; right:0;
+  height:3px;
+  background:linear-gradient(90deg, transparent, rgba(255,0,200,0.2) 20%, rgba(255,0,200,0.45) 50%, rgba(255,0,200,0.2) 80%, transparent);
+  animation: scanSweep 5s linear infinite;
+  z-index:2;
+  pointer-events:none;
+  filter:blur(1px);
+}
+.scanline2 {
+  position:absolute;
+  left:0; right:0;
+  height:2px;
+  background:linear-gradient(90deg, transparent, rgba(64,224,255,0.15) 30%, rgba(64,224,255,0.35) 50%, rgba(64,224,255,0.15) 70%, transparent);
+  animation: scanSweep 5s linear 2.5s infinite;
+  z-index:2;
+  pointer-events:none;
+  filter:blur(1px);
+}
+@keyframes scanSweep {
+  0%   { top:-4px; opacity:0; }
+  5%   { opacity:1; }
+  90%  { opacity:.6; }
+  95%  { opacity:0; }
+  100% { top:564px; opacity:0; }
+}
+
+.vortex {
+  position:absolute;
+  top:30px; left:50%;
+  transform:translateX(-50%);
+  width:80px; height:80px;
+  border-radius:50%;
+  z-index:1;
+  pointer-events:none;
+}
+.vortex::before {
+  content:'';
+  position:absolute;
+  inset:0;
+  border-radius:50%;
+  background: conic-gradient(from 0deg,
+    transparent 0deg,
+    rgba(255,0,180,0.05) 60deg,
+    rgba(255,0,180,0.12) 120deg,
+    rgba(120,80,255,0.1) 180deg,
+    rgba(64,224,255,0.06) 240deg,
+    transparent 360deg);
+  animation: vortexSpin 8s linear infinite;
+  filter:blur(2px);
+}
+.vortex::after {
+  content:'';
+  position:absolute;
+  inset:12px;
+  border-radius:50%;
+  background: conic-gradient(from 180deg,
+    transparent 0deg,
+    rgba(64,224,255,0.08) 90deg,
+    rgba(255,0,180,0.1) 180deg,
+    transparent 360deg);
+  animation: vortexSpin 5s linear reverse infinite;
+  filter:blur(1px);
+}
+@keyframes vortexSpin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+.energy-ring {
+  position:absolute;
+  border-radius:50%;
+  border:1px solid rgba(255,0,200,0.25);
+  left:50%; top:50%;
+  transform:translate(-50%,-50%) scale(0);
+  animation: ringExpand 3s ease-out infinite;
+  z-index:2;
+  pointer-events:none;
+}
+.energy-ring:nth-child(2) { animation-delay:1s; border-color:rgba(64,224,255,0.2); }
+.energy-ring:nth-child(3) { animation-delay:2s; border-color:rgba(180,0,255,0.15); }
+@keyframes ringExpand {
+  0%   { width:20px;height:20px;opacity:.9;transform:translate(-50%,-50%) scale(0); }
+  100% { width:380px;height:380px;opacity:0;transform:translate(-50%,-50%) scale(1); }
+}
+
+.data-stream {
+  position:absolute;
+  width:1px;
+  top:0; bottom:0;
+  z-index:1;
+  pointer-events:none;
+  overflow:hidden;
+}
+.data-stream::before {
+  content:'';
+  position:absolute;
+  width:1px;
+  height:60px;
+  background:linear-gradient(180deg, transparent, rgba(255,0,200,0.5), rgba(255,0,200,0.9), rgba(255,0,200,0.2), transparent);
+  animation: dataFall var(--speed) linear var(--start) infinite;
+  filter:blur(0.5px);
+}
+.data-stream.cyan::before {
+  background:linear-gradient(180deg, transparent, rgba(64,224,255,0.4), rgba(64,224,255,0.8), rgba(64,224,255,0.2), transparent);
+}
+@keyframes dataFall {
+  0%   { top:-80px; opacity:0; }
+  5%   { opacity:1; }
+  90%  { opacity:.6; }
+  100% { top:620px; opacity:0; }
+}
+
+.hex-overlay {
+  position:absolute;
+  left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  width:200px; height:200px;
+  z-index:1;
+  pointer-events:none;
+  opacity:.08;
+  animation: hexPulse 6s ease-in-out infinite;
+}
+@keyframes hexPulse {
+  0%,100% { opacity:.05; transform:translate(-50%,-50%) rotate(0deg) scale(1); }
+  50% { opacity:.12; transform:translate(-50%,-50%) rotate(3deg) scale(1.05); }
+}
+
+.star-field { position:absolute;inset:0;z-index:1;pointer-events:none; }
+.star {
+  position:absolute;
+  border-radius:50%;
+  background:white;
+  animation:twinkle var(--dur) ease-in-out var(--delay) infinite;
+}
+@keyframes twinkle {
+  0%,100% { opacity:var(--min-op);transform:scale(1); }
+  50% { opacity:1;transform:scale(1.6); }
+}
+
+/* ========================
+   RAILS / ARCH
+======================== */
+.rail-left,.rail-right {
+  position:absolute;
+  top:0;
+  width:14px;
+  height:370px;
+  border-radius:7px;
+  background:linear-gradient(90deg,
+    rgba(0,10,40,0.8),
+    rgba(255,0,180,0.5) 25%,
+    rgba(64,224,255,0.7) 50%,
+    rgba(255,0,180,0.5) 75%,
+    rgba(0,10,40,0.8));
+  box-shadow:
+    0 0 12px rgba(255,0,180,0.7),
+    0 0 30px rgba(255,0,180,0.35),
+    0 0 60px rgba(255,0,180,0.15);
+  z-index:5;
+}
+.rail-left { left:18px; }
+.rail-right { right:18px; }
+.rail-left::after,.rail-right::after {
+  content:'';
+  position:absolute;
+  top:0;left:0;right:0;
+  height:30%;
+  background:linear-gradient(180deg,rgba(255,255,255,0.35),transparent);
+  border-radius:inherit;
+  animation:railShimmer 3s ease-in-out infinite;
+}
+.rail-right::after { animation-delay:1.5s; }
+@keyframes railShimmer {
+  0%,100% { opacity:.3; }
+  50% { opacity:.8; }
+}
+
+.arch-top {
+  position:absolute;
+  top:0; left:18px; right:18px;
+  height:80px;
+  border-radius:80px 80px 0 0;
+  border:14px solid transparent;
+  border-bottom:none;
+  background:
+    linear-gradient(135deg, transparent, rgba(255,0,180,0.05)) padding-box,
+    linear-gradient(135deg, #2a0030, #ff00cc, #ff80e8, #40e0ff, #ff00cc, #2a0030) border-box;
+  box-shadow:0 0 25px rgba(255,0,180,0.35) inset;
+  z-index:5;
+}
+
+.shooter-lane {
+  position:absolute;
+  right:32px; top:100px; bottom:60px;
+  width:20px;
+  background:linear-gradient(90deg, rgba(0,0,20,0.95), rgba(40,0,60,0.3), rgba(0,0,20,0.95));
+  border:1px solid rgba(255,0,180,0.15);
+  box-shadow:0 0 8px rgba(255,0,180,0.1) inset;
+  z-index:3;
+}
+
+/* ========================
+   POP BUMPERS
+======================== */
+.bumper {
+  position:absolute;
+  border-radius:50%;
+  z-index:6;
+}
+.bumper::after {
+  content:'';
+  position:absolute;
+  inset:0;
+  border-radius:50%;
+  background:conic-gradient(from 0deg, #ff00cc, #40e0ff, #ff00cc, #8040ff, #ff80e8, #40e0ff, #ff00cc);
+  animation:spin var(--bspeed,3s) linear infinite;
+  box-shadow:
+    0 0 16px rgba(255,0,200,0.8),
+    0 0 40px rgba(255,0,200,0.4),
+    0 0 80px rgba(255,0,200,0.15);
+}
+.bumper::before {
+  content:'';
+  position:absolute;
+  inset:3px;
+  border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,
+    rgba(255,200,240,0.95) 0%,
+    rgba(255,0,200,0.65) 25%,
+    rgba(80,0,80,0.85) 55%,
+    rgba(10,0,20,0.97) 100%);
+  box-shadow:
+    inset 0 0 12px rgba(255,0,200,0.5),
+    inset 0 -4px 10px rgba(0,0,40,0.7),
+    inset 0 4px 6px rgba(255,180,240,0.3);
+  z-index:1;
+}
+.bumper-glow {
+  position:absolute;
+  border-radius:50%;
+  animation:bumperPulse var(--bspeed,3s) ease-in-out infinite;
+  z-index:5;
+  pointer-events:none;
+}
+@keyframes bumperPulse {
+  0%,100% { box-shadow:0 0 20px rgba(255,0,200,0.3); }
+  50%     { box-shadow:0 0 50px rgba(255,0,200,0.7),0 0 80px rgba(64,224,255,0.25); }
+}
+.bumper.lg { width:54px;height:54px; }
+.bumper.sm { width:36px;height:36px;--bspeed:2.2s; }
+@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+/* ========================
+   BALL
+======================== */
+.ball {
+  position:absolute;
+  border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#ffffff,#e0c0ff 35%,#6020c0 75%,#080018);
+  box-shadow:
+    0 0 12px rgba(180,100,255,0.7),
+    0 0 25px rgba(180,100,255,0.35),
+    2px 3px 8px rgba(0,0,40,0.9);
+  z-index:10;
+}
+
+/* ========================
+   FLIPPERS — proper tapered wedge shape using clip-path
+======================== */
+.flipper-wrap {
+  position:absolute;
+  z-index:7;
+}
+
+/* Left flipper: wide on pivot left, tapers right */
+.flipper-left {
+  width: 80px;
+  height: 16px;
+  position: relative;
+}
+.flipper-left::before {
+  content:'';
+  position:absolute;
+  inset:0;
+  clip-path: polygon(0% 15%, 100% 35%, 100% 65%, 0% 85%);
+  background:linear-gradient(180deg,
+    rgba(255,180,240,0.95) 0%,
+    rgba(255,0,200,0.85) 30%,
+    rgba(120,0,100,0.9) 65%,
+    rgba(20,0,30,1) 100%);
+  box-shadow:
+    0 0 14px rgba(255,0,200,0.8),
+    0 0 35px rgba(255,0,200,0.4),
+    0 0 70px rgba(255,0,200,0.15);
+  filter: drop-shadow(0 0 6px rgba(255,0,200,0.9));
+}
+.flipper-left::after {
+  content:'';
+  position:absolute;
+  inset:0;
+  clip-path: polygon(0% 15%, 100% 35%, 100% 40%, 0% 25%);
+  background:linear-gradient(90deg, rgba(255,255,255,0.5), rgba(255,200,240,0.2), transparent);
+  animation:flipShimmer 2.2s ease-in-out infinite;
+}
+
+/* Right flipper: wide on pivot right, tapers left */
+.flipper-right {
+  width: 80px;
+  height: 16px;
+  position: relative;
+}
+.flipper-right::before {
+  content:'';
+  position:absolute;
+  inset:0;
+  clip-path: polygon(0% 35%, 100% 15%, 100% 85%, 0% 65%);
+  background:linear-gradient(180deg,
+    rgba(255,180,240,0.95) 0%,
+    rgba(255,0,200,0.85) 30%,
+    rgba(120,0,100,0.9) 65%,
+    rgba(20,0,30,1) 100%);
+  box-shadow:
+    0 0 14px rgba(255,0,200,0.8),
+    0 0 35px rgba(255,0,200,0.4);
+  filter: drop-shadow(0 0 6px rgba(255,0,200,0.9));
+}
+.flipper-right::after {
+  content:'';
+  position:absolute;
+  inset:0;
+  clip-path: polygon(100% 15%, 0% 35%, 0% 40%, 100% 25%);
+  background:linear-gradient(270deg, rgba(255,255,255,0.5), rgba(255,200,240,0.2), transparent);
+  animation:flipShimmer 2.2s ease-in-out 1.1s infinite;
+}
+
+@keyframes flipShimmer {
+  0%   { opacity:.4; }
+  50%  { opacity:.9; }
+  100% { opacity:.4; }
+}
+
+/* Flipper glow halos */
+.flipper-halo {
+  position:absolute;
+  z-index:6;
+  pointer-events:none;
+  animation:flipHalo 2s ease-in-out infinite;
+}
+@keyframes flipHalo {
+  0%,100% { opacity:.3; }
+  50%     { opacity:.8; }
+}
+
+/* ========================
+   SLINGSHOTS
+======================== */
+.sling { position:absolute; z-index:5; }
+.sling::before {
+  content:'';
+  position:absolute;
+  width:12px; height:70px;
+  background:linear-gradient(180deg,
+    rgba(255,0,200,0.9),
+    rgba(180,0,255,0.7),
+    rgba(255,0,200,0.9));
+  box-shadow:0 0 10px rgba(255,0,200,0.7),0 0 25px rgba(255,0,200,0.35);
+  border-radius:3px;
+  animation:slingSpark 2s ease-in-out infinite;
+}
+.sling.left::before { transform:rotate(30deg); }
+.sling.right::before { transform:rotate(-30deg); }
+@keyframes slingSpark {
+  0%,100% { box-shadow:0 0 8px rgba(255,0,200,0.5),0 0 20px rgba(255,0,200,0.25); }
+  50%     { box-shadow:0 0 18px rgba(255,0,200,0.95),0 0 45px rgba(255,0,200,0.55),0 0 90px rgba(255,0,200,0.2); }
+}
+
+/* ========================
+   GUIDES / KICKERS
+======================== */
+.guide {
+  position:absolute;
+  width:8px;
+  border-radius:4px;
+  background:linear-gradient(180deg,rgba(255,0,200,0.7),rgba(100,0,120,0.3));
+  box-shadow:0 0 6px rgba(255,0,200,0.5);
+  z-index:4;
+}
+.kicker { position:absolute;z-index:5; }
+.kicker::before {
+  content:'';
+  position:absolute;
+  width:8px;height:40px;
+  border-radius:2px;
+  background:linear-gradient(180deg,rgba(255,0,200,0.9),rgba(100,0,200,0.5));
+  box-shadow:0 0 8px rgba(255,0,200,0.6);
+}
+.kicker.left::before { transform:rotate(45deg);left:-4px; }
+.kicker.right::before { transform:rotate(-45deg);left:-4px; }
+
+/* ========================
+   DOTS
+======================== */
+.dot {
+  position:absolute;
+  border-radius:50%;
+  z-index:5;
+  animation:dotPulse 2s ease-in-out infinite;
+}
+@keyframes dotPulse {
+  0%,100% { filter:brightness(1); }
+  50%     { filter:brightness(1.8) saturate(1.5); }
+}
+
+/* ========================
+   INDICATORS
+======================== */
+.indicator {
+  position:absolute;
+  border-radius:50%;
+  z-index:6;
+}
+.indicator.active {
+  background:radial-gradient(circle at 40% 35%,#ffb0f0,#ff00cc 45%,#600050);
+  box-shadow:0 0 6px rgba(255,0,200,1),0 0 14px rgba(255,0,200,0.5);
+  animation:indicatorBlink 1.5s ease-in-out infinite;
+}
+.indicator.inactive {
+  background:radial-gradient(circle at 40% 35%,#200018,#100010);
+  border:1px solid rgba(180,0,120,0.2);
+}
+@keyframes indicatorBlink {
+  0%,100% { box-shadow:0 0 6px rgba(255,0,200,0.8),0 0 12px rgba(255,0,200,0.4); }
+  50%     { box-shadow:0 0 10px rgba(255,0,200,1),0 0 22px rgba(255,0,200,0.7),0 0 40px rgba(255,0,200,0.3); }
+}
+
+/* ========================
+   SCORE TARGET
+======================== */
+.score-target {
+  position:absolute;
+  width:36px;height:36px;
+  border-radius:50%;
+  border:1.5px solid rgba(255,0,200,0.5);
+  display:flex;align-items:center;justify-content:center;
+  font-size:8px;
+  color:#ff00cc;
+  font-family:'Orbitron',monospace;
+  background:rgba(20,0,30,0.7);
+  z-index:5;
+  animation:scoreGlow 2.5s ease-in-out infinite;
+}
+@keyframes scoreGlow {
+  0%,100% { box-shadow:0 0 8px rgba(255,0,200,0.3),inset 0 0 6px rgba(255,0,200,0.08);border-color:rgba(255,0,200,0.4); }
+  50%     { box-shadow:0 0 20px rgba(255,0,200,0.6),inset 0 0 14px rgba(255,0,200,0.2);border-color:rgba(255,0,200,0.9); }
+}
+
+/* ========================
+   PLUNGER
+======================== */
+.plunger {
+  position:absolute;
+  width:12px;height:30px;
+  background:linear-gradient(180deg,rgba(255,0,200,0.5),rgba(80,0,100,0.7));
+  border:1px solid rgba(255,0,200,0.4);
+  border-radius:3px;
+  box-shadow:0 0 8px rgba(255,0,200,0.4);
+  z-index:6;
+  animation:plungerCharge 2s ease-in-out infinite;
+}
+@keyframes plungerCharge {
+  0%,100% { box-shadow:0 0 6px rgba(255,0,200,0.3); }
+  50%     { box-shadow:0 0 14px rgba(255,0,200,0.8),0 0 30px rgba(255,0,200,0.35); }
+}
+
+/* ========================
+   SND BUTTON
+======================== */
+.snd-btn {
+  position:absolute;
+  top:12px;right:12px;
+  padding:3px 8px;
+  font-size:9px;
+  font-family:'Orbitron',monospace;
+  background:rgba(20,0,30,0.85);
+  color:#ff00cc;
+  border:1px solid rgba(255,0,200,0.4);
+  border-radius:3px;
+  box-shadow:0 0 8px rgba(255,0,200,0.3);
+  cursor:pointer;
+  z-index:20;
+  letter-spacing:1px;
+}
+
+/* ========================
+   CONDUITS / DRAIN
+======================== */
+.conduit { position:absolute;z-index:3;pointer-events:none; }
+.conduit-left {
+  left:34px;top:380px;bottom:60px;
+  width:2px;
+  background:linear-gradient(180deg,rgba(255,0,200,0),rgba(255,0,200,0.25),rgba(255,0,200,0));
+  animation:conduitFlow 2s linear infinite;
+}
+.conduit-right {
+  right:54px;top:380px;bottom:60px;
+  width:2px;
+  background:linear-gradient(180deg,rgba(64,224,255,0),rgba(64,224,255,0.25),rgba(64,224,255,0));
+  animation:conduitFlow 2s linear 1s infinite;
+}
+@keyframes conduitFlow { 0%,100%{opacity:.3} 50%{opacity:.9} }
+
+.drain-light {
+  position:absolute;
+  bottom:0;left:50%;
+  transform:translateX(-50%);
+  width:60px;height:20px;
+  background:radial-gradient(ellipse at 50% 100%,rgba(255,0,200,0.2),transparent 70%);
+  z-index:3;
+  animation:drainPulse 3s ease-in-out infinite;
+}
+@keyframes drainPulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+
+/* ========================
+   OUTER FRAME LABEL
+======================== */
+.frame-footer {
+  width:320px;
+  background:#0a0008;
+  border-radius:0 0 12px 12px;
+  padding:8px 12px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  box-shadow:
+    0 0 0 2px #2a0030,
+    0 0 0 4px #ff00cc,
+    0 0 0 6px #2a0030,
+    0 20px 40px rgba(255,0,200,0.2);
+  margin:0;
+}
+.frame-label {
+  font-size:8px;
+  letter-spacing:3px;
+  color:rgba(255,0,200,0.5);
+  font-family:'Share Tech Mono',monospace;
+}
+.frame-version {
+  font-size:8px;
+  letter-spacing:2px;
+  color:rgba(64,224,255,0.4);
+  font-family:'Share Tech Mono',monospace;
+}
+
+</style>
+</head>
+<body>
+
+<!-- ======================== DMD HOUSING ======================== -->
+<div class="dmd-housing">
+  <div class="dmd-screen">
+    <canvas id="dmdCanvas"></canvas>
+  </div>
+  <div class="dmd-bottom-bar">
+    <span class="dmd-label">PLAYER 1</span>
+    <span class="dmd-label">BALL 1</span>
+    <span class="dmd-credits">CREDITS: 3</span>
+  </div>
+</div>
+
+<!-- ======================== PINBALL TABLE ======================== -->
+<div class="pinball-table" id="table">
+  <canvas id="bgCanvas"></canvas>
+
+  <div class="nebula"></div>
+  <div class="warp-grid"></div>
+  <div class="scanline"></div>
+  <div class="scanline2"></div>
+  <div class="vortex"></div>
+
+  <div class="energy-ring"></div>
+  <div class="energy-ring"></div>
+  <div class="energy-ring"></div>
+
+  <div class="star-field" id="starField"></div>
+
+  <div class="hex-overlay">
+    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+      <defs>
+        <pattern id="hex" x="0" y="0" width="34.6" height="40" patternUnits="userSpaceOnUse">
+          <polygon points="17.3,0 34.6,10 34.6,30 17.3,40 0,30 0,10" fill="none" stroke="rgba(255,0,200,0.7)" stroke-width="0.5"/>
+        </pattern>
+      </defs>
+      <rect width="200" height="200" fill="url(#hex)"/>
+    </svg>
+  </div>
+
+  <!-- data streams: alternating magenta / cyan -->
+  <div class="data-stream" style="left:68px;--speed:4.2s;--start:0s;"></div>
+  <div class="data-stream cyan" style="left:95px;--speed:6.1s;--start:1.3s;"></div>
+  <div class="data-stream" style="left:148px;--speed:5s;--start:0.7s;"></div>
+  <div class="data-stream cyan" style="left:185px;--speed:4.7s;--start:2.1s;"></div>
+  <div class="data-stream" style="left:225px;--speed:5.8s;--start:0.4s;"></div>
+
+  <div class="conduit conduit-left"></div>
+  <div class="conduit conduit-right"></div>
+  <div class="drain-light"></div>
+
+  <button class="snd-btn">SND</button>
+
+  <div class="rail-left"></div>
+  <div class="rail-right"></div>
+  <div class="arch-top"></div>
+  <div class="shooter-lane"></div>
+
+  <!-- Ball indicators -->
+  <div class="indicator active" style="width:9px;height:9px;left:78px;top:22px;"></div>
+  <div class="indicator active" style="width:9px;height:9px;left:92px;top:22px;"></div>
+  <div class="indicator inactive" style="width:9px;height:9px;left:106px;top:22px;"></div>
+  <div class="indicator inactive" style="width:9px;height:9px;left:120px;top:22px;"></div>
+  <div class="indicator inactive" style="width:9px;height:9px;left:134px;top:22px;"></div>
+  <div class="indicator inactive" style="width:9px;height:9px;left:148px;top:22px;"></div>
+  <div class="indicator inactive" style="width:9px;height:9px;left:162px;top:22px;"></div>
+  <div class="indicator inactive" style="width:9px;height:9px;left:198px;top:22px;"></div>
+
+  <!-- Top pop bumpers -->
+  <div class="bumper lg" style="left:72px;top:52px;--bspeed:3.2s;"></div>
+  <div class="bumper lg" style="left:170px;top:52px;--bspeed:2.8s;"></div>
+  <div class="bumper-glow lg" style="width:54px;height:54px;left:72px;top:52px;border-radius:50%;--bspeed:3.2s;"></div>
+  <div class="bumper-glow lg" style="width:54px;height:54px;left:170px;top:52px;border-radius:50%;--bspeed:2.8s;"></div>
+
+  <!-- Red/pink target ball -->
+  <div class="ball" style="width:16px;height:16px;left:136px;top:114px;background:radial-gradient(circle at 35% 30%,#fff,#ff80d0 35%,#cc0090 75%,#300020);box-shadow:0 0 12px rgba(255,0,160,0.8),0 0 28px rgba(255,0,160,0.4),2px 3px 8px rgba(0,0,20,0.9);"></div>
+
+  <div class="score-target" style="left:118px;top:136px;">100</div>
+
+  <!-- Mid pop bumpers -->
+  <div class="bumper lg" style="left:100px;top:192px;--bspeed:3.6s;"></div>
+  <div class="bumper lg" style="left:190px;top:192px;--bspeed:2.5s;"></div>
+  <div class="bumper-glow lg" style="width:54px;height:54px;left:100px;top:192px;border-radius:50%;--bspeed:3.6s;"></div>
+  <div class="bumper-glow lg" style="width:54px;height:54px;left:190px;top:192px;border-radius:50%;--bspeed:2.5s;"></div>
+
+  <!-- Side small bumpers -->
+  <div class="bumper sm" style="left:26px;top:192px;--bspeed:4s;"></div>
+  <div class="bumper sm" style="left:234px;top:192px;--bspeed:2s;"></div>
+  <div class="bumper-glow sm" style="width:36px;height:36px;left:26px;top:192px;border-radius:50%;--bspeed:4s;"></div>
+  <div class="bumper-glow sm" style="width:36px;height:36px;left:234px;top:192px;border-radius:50%;--bspeed:2s;"></div>
+
+  <!-- Dot targets -->
+  <div class="dot" style="width:6px;height:6px;left:138px;top:250px;background:radial-gradient(circle at 40% 35%,#ffb0ff,#ff00cc 50%,#500050);box-shadow:0 0 6px rgba(255,0,200,0.9);"></div>
+  <div class="dot" style="width:6px;height:6px;left:150px;top:250px;background:radial-gradient(circle at 40% 35%,#ffb0ff,#ff00cc 50%,#500050);box-shadow:0 0 6px rgba(255,0,200,0.9);"></div>
+  <div class="dot" style="width:6px;height:6px;left:162px;top:250px;background:radial-gradient(circle at 40% 35%,#ffb0ff,#ff00cc 50%,#500050);box-shadow:0 0 6px rgba(255,0,200,0.9);"></div>
+  <div class="dot" style="width:5px;height:5px;left:133px;top:263px;background:radial-gradient(circle at 40% 35%,#b0f8ff,#40e0ff 50%,#003890);box-shadow:0 0 5px rgba(64,224,255,0.8);"></div>
+  <div class="dot" style="width:5px;height:5px;left:145px;top:263px;background:radial-gradient(circle at 40% 35%,#b0f8ff,#40e0ff 50%,#003890);box-shadow:0 0 5px rgba(64,224,255,0.8);"></div>
+  <div class="dot" style="width:5px;height:5px;left:157px;top:263px;background:radial-gradient(circle at 40% 35%,#b0f8ff,#40e0ff 50%,#003890);box-shadow:0 0 5px rgba(64,224,255,0.8);"></div>
+  <div class="dot" style="width:5px;height:5px;left:169px;top:263px;background:radial-gradient(circle at 40% 35%,#b0f8ff,#40e0ff 50%,#003890);box-shadow:0 0 5px rgba(64,224,255,0.8);"></div>
+  <div class="dot" style="width:5px;height:5px;left:128px;top:276px;background:radial-gradient(circle at 40% 35%,#ffb0ff,#ff00cc 50%,#500050);box-shadow:0 0 5px rgba(255,0,200,0.8);"></div>
+  <div class="dot" style="width:5px;height:5px;left:140px;top:276px;background:radial-gradient(circle at 40% 35%,#ffb0ff,#ff00cc 50%,#500050);box-shadow:0 0 5px rgba(255,0,200,0.8);"></div>
+  <div class="dot" style="width:5px;height:5px;left:152px;top:276px;background:radial-gradient(circle at 40% 35%,#b0f8ff,#40e0ff 50%,#003890);box-shadow:0 0 5px rgba(64,224,255,0.8);"></div>
+  <div class="dot" style="width:5px;height:5px;left:164px;top:276px;background:radial-gradient(circle at 40% 35%,#b0f8ff,#40e0ff 50%,#003890);box-shadow:0 0 5px rgba(64,224,255,0.8);"></div>
+  <!-- center hot dot -->
+  <div class="dot" style="width:7px;height:7px;left:155px;top:250px;background:radial-gradient(circle at 40% 35%,#ffffff,#ff80ff 40%,#ff00cc 70%,#400040);box-shadow:0 0 10px rgba(255,0,200,1);"></div>
+
+  <!-- Right target bank (cyan) -->
+  <div class="dot" style="width:6px;height:6px;left:218px;top:258px;background:radial-gradient(circle at 40% 35%,#b0f8ff,#40e0ff 50%,#003890);box-shadow:0 0 6px rgba(64,224,255,0.8);"></div>
+  <div class="dot" style="width:6px;height:6px;left:218px;top:274px;background:radial-gradient(circle at 40% 35%,#b0f8ff,#40e0ff 50%,#003890);box-shadow:0 0 6px rgba(64,224,255,0.8);"></div>
+  <div class="dot" style="width:6px;height:6px;left:218px;top:290px;background:radial-gradient(circle at 40% 35%,#ffb0ff,#ff00cc 50%,#500050);box-shadow:0 0 6px rgba(255,0,200,0.7);"></div>
+  <div class="dot" style="width:6px;height:6px;left:218px;top:306px;background:radial-gradient(circle at 40% 35%,#b0f8ff,#40e0ff 50%,#003890);box-shadow:0 0 6px rgba(64,224,255,0.8);"></div>
+
+  <!-- Left lane bumpers (magenta/cyan alternating) -->
+  <div class="dot" style="width:10px;height:10px;left:50px;top:260px;background:radial-gradient(circle at 40% 35%,#ffddff,#ff00cc 50%,#600060);box-shadow:0 0 7px rgba(255,0,200,0.9);"></div>
+  <div class="dot" style="width:10px;height:10px;left:50px;top:277px;background:radial-gradient(circle at 40% 35%,#ccffff,#40e0ff 50%,#004466);box-shadow:0 0 7px rgba(64,224,255,0.8);"></div>
+  <div class="dot" style="width:10px;height:10px;left:50px;top:294px;background:radial-gradient(circle at 40% 35%,#ffddff,#ff00cc 50%,#600060);box-shadow:0 0 7px rgba(255,0,200,0.9);"></div>
+  <div class="dot" style="width:9px;height:9px;left:52px;top:311px;background:radial-gradient(circle at 40% 35%,#ccffff,#40e0ff 50%,#004466);box-shadow:0 0 6px rgba(64,224,255,0.7);"></div>
+  <div class="dot" style="width:9px;height:9px;left:52px;top:327px;background:radial-gradient(circle at 40% 35%,#ffddff,#ff00cc 50%,#600060);box-shadow:0 0 6px rgba(255,0,200,0.8);"></div>
+  <div class="dot" style="width:8px;height:8px;left:54px;top:343px;background:radial-gradient(circle at 40% 35%,#ccffff,#40e0ff 50%,#004466);box-shadow:0 0 5px rgba(64,224,255,0.7);"></div>
+  <div class="dot" style="width:8px;height:8px;left:54px;top:358px;background:radial-gradient(circle at 40% 35%,#ffddff,#ff00cc 50%,#600060);box-shadow:0 0 5px rgba(255,0,200,0.8);"></div>
+
+  <!-- Lower small bumpers -->
+  <div class="bumper sm" style="left:44px;top:432px;--bspeed:3.8s;"></div>
+  <div class="bumper sm" style="left:214px;top:432px;--bspeed:3s;"></div>
+  <div class="bumper-glow sm" style="width:36px;height:36px;left:44px;top:432px;border-radius:50%;--bspeed:3.8s;"></div>
+  <div class="bumper-glow sm" style="width:36px;height:36px;left:214px;top:432px;border-radius:50%;--bspeed:3s;"></div>
+
+  <!-- Slingshots -->
+  <div class="sling left" style="left:90px;top:452px;"></div>
+  <div class="sling right" style="left:193px;top:452px;"></div>
+
+  <!-- Inlane guides -->
+  <div class="guide" style="left:88px;top:462px;height:60px;transform:rotate(15deg);"></div>
+  <div class="guide" style="left:112px;top:462px;height:60px;transform:rotate(-5deg);"></div>
+  <div class="guide" style="left:184px;top:462px;height:60px;transform:rotate(5deg);"></div>
+  <div class="guide" style="left:200px;top:462px;height:60px;transform:rotate(-15deg);"></div>
+
+  <!-- Kickers / outlanes -->
+  <div class="kicker left" style="left:56px;top:478px;"></div>
+  <div class="kicker right" style="left:228px;top:478px;"></div>
+
+  <!-- FLIPPERS — properly tapered wedge shapes -->
+  <!-- Left flipper: pivot at left, angled down ~22deg -->
+  <div class="flipper-wrap" style="left:55px;top:506px;transform:rotate(-22deg);transform-origin:left center;">
+    <div class="flipper-left"></div>
+  </div>
+  <!-- Right flipper: pivot at right, angled down ~22deg -->
+  <div class="flipper-wrap" style="left:163px;top:506px;transform:rotate(22deg);transform-origin:right center;">
+    <div class="flipper-right"></div>
+  </div>
+
+  <!-- Shooter ball & plunger -->
+  <div class="ball" style="width:14px;height:14px;right:37px;bottom:83px;"></div>
+  <div class="plunger" style="right:36px;bottom:52px;"></div>
+
+  <!-- Drain dot -->
+  <div class="dot" style="width:7px;height:7px;left:147px;bottom:10px;background:radial-gradient(circle at 40% 35%,#ffb0ff,#ff00cc);box-shadow:0 0 7px rgba(255,0,200,0.9);"></div>
+</div>
+
+<!-- FRAME FOOTER -->
+<div class="frame-footer">
+  <span class="frame-label">DEEP SPACE PINBALL</span>
+  <span class="frame-version">SYS-REV 4.2.1</span>
+</div>
+
+<script>
+// ======================== STAR FIELD ========================
+const sf = document.getElementById('starField');
+const starData = [
+  [18,8],[45,5],[72,12],[95,3],[130,18],[165,8],[205,14],[238,6],[255,20],
+  [12,35],[58,42],[88,28],[140,45],[185,32],[222,40],[268,25],[285,50],
+  [25,65],[70,58],[115,72],[155,60],[195,68],[240,55],[280,70],
+  [10,90],[50,82],[100,96],[145,88],[190,100],[235,85],[290,92],
+  [30,120],[75,110],[125,130],[168,118],[210,125],[255,115],[285,132],
+  [15,155],[65,148],[110,165],[158,152],[200,160],[248,145],[282,168],
+  [35,190],[80,182],[128,196],[172,185],[215,192],[260,178],[288,200],
+  [22,225],[68,218],[115,230],[162,220],[208,228],[252,215],[280,235],
+  [18,260],[72,252],[120,268],[165,255],[212,262],[258,250],[286,270],
+  [28,295],[76,288],[124,302],[170,290],[216,298],[262,285],[284,305],
+  [10,330],[60,322],[112,338],[162,325],[214,332],[260,320],[288,340],
+  [25,365],[75,358],[125,372],[172,360],[218,368],[265,355],[285,375],
+  [18,400],[70,392],[118,408],[166,395],[214,402],[260,390],[286,410],
+  [30,435],[78,428],[128,442],[175,430],[222,438],[268,425],[284,445],
+  [12,470],[62,462],[115,478],[165,465],[215,472],[262,460],[285,480],
+];
+starData.forEach(([x,y]) => {
+  const s = document.createElement('div');
+  s.className = 'star';
+  const size = Math.random() < 0.15 ? 2 : 1;
+  const minOp = 0.1 + Math.random() * 0.3;
+  // randomly tint some stars magenta
+  const isMag = Math.random() < 0.3;
+  s.style.cssText = `left:${x}px;top:${y}px;width:${size}px;height:${size}px;
+    --dur:${1.5+Math.random()*4}s;--delay:${Math.random()*4}s;--min-op:${minOp};
+    opacity:${minOp};${isMag ? 'background:rgba(255,120,240,0.9);' : ''}`;
+  sf.appendChild(s);
+});
+
+// ======================== BACKGROUND CANVAS ========================
+const bgCanvas = document.getElementById('bgCanvas');
+const bgCtx = bgCanvas.getContext('2d');
+bgCanvas.width = 300;
+bgCanvas.height = 560;
+
+const shootingStars = [];
+function spawnStar() {
+  const isMag = Math.random() < 0.45;
+  return {
+    x: Math.random()*320-10, y: Math.random()*200,
+    vx: 1.5+Math.random()*3, vy: 0.8+Math.random()*2,
+    len: 30+Math.random()*60,
+    life: 1, decay: 0.012+Math.random()*0.018,
+    color: isMag ? [255,0,200] : (Math.random()<0.5 ? [64,224,255] : [180,80,255]),
+  };
+}
+
+const energyParticles = [];
+function spawnParticle() {
+  const isMag = Math.random() < 0.5;
+  return {
+    x: 60+Math.random()*180, y: 520+Math.random()*30,
+    vy: -(0.3+Math.random()*0.7), vx: (Math.random()-0.5)*0.4,
+    life: 1, decay: 0.005+Math.random()*0.008,
+    size: 1+Math.random()*2,
+    color: isMag ? [255,0,200] : [64,224,255],
+  };
+}
+
+let orbitalAngle = 0;
+
+function bgAnimate(ts) {
+  bgCtx.clearRect(0,0,300,560);
+
+  // bg gradient
+  const bg = bgCtx.createRadialGradient(150,0,0,150,280,350);
+  bg.addColorStop(0,'rgba(15,0,25,0.85)');
+  bg.addColorStop(0.5,'rgba(5,0,15,0.7)');
+  bg.addColorStop(1,'rgba(0,0,8,0.9)');
+  bgCtx.fillStyle = bg;
+  bgCtx.fillRect(0,0,300,560);
+
+  // warp tunnel rings — now magenta/cyan alternating
+  bgCtx.save();
+  const cx=150, cy=220;
+  for (let ring=0; ring<8; ring++) {
+    const t = (ts*0.0003+ring*0.15)%1;
+    const eased = t*t;
+    const rr = eased*260;
+    const alpha = (1-eased)*0.12;
+    bgCtx.globalAlpha = alpha;
+    bgCtx.beginPath();
+    bgCtx.ellipse(cx,cy,rr,rr*0.55,0,0,Math.PI*2);
+    const col = ring%2===0 ? '255,0,200' : '64,224,255';
+    bgCtx.strokeStyle = `rgba(${col},1)`;
+    bgCtx.lineWidth = 0.8;
+    bgCtx.stroke();
+  }
+  bgCtx.restore();
+
+  // shooting stars
+  if (Math.random()<0.018) shootingStars.push(spawnStar());
+  bgCtx.save();
+  for (let i=shootingStars.length-1; i>=0; i--) {
+    const s=shootingStars[i];
+    s.x+=s.vx; s.y+=s.vy; s.life-=s.decay;
+    if (s.life<=0) { shootingStars.splice(i,1); continue; }
+    const spd = Math.hypot(s.vx,s.vy);
+    const grad = bgCtx.createLinearGradient(s.x,s.y, s.x-s.vx*(s.len/spd), s.y-s.vy*(s.len/spd));
+    const [r,g,b]=s.color;
+    grad.addColorStop(0,`rgba(${r},${g},${b},${s.life*0.9})`);
+    grad.addColorStop(0.3,`rgba(${r},${g},${b},${s.life*0.4})`);
+    grad.addColorStop(1,`rgba(${r},${g},${b},0)`);
+    bgCtx.beginPath();
+    bgCtx.moveTo(s.x,s.y);
+    bgCtx.lineTo(s.x-s.vx*(s.len/spd), s.y-s.vy*(s.len/spd));
+    bgCtx.strokeStyle=grad;
+    bgCtx.lineWidth=1.5*s.life;
+    bgCtx.stroke();
+    bgCtx.beginPath();
+    bgCtx.arc(s.x,s.y,1.5*s.life,0,Math.PI*2);
+    bgCtx.fillStyle=`rgba(255,255,255,${s.life*0.8})`;
+    bgCtx.fill();
+  }
+  bgCtx.restore();
+
+  // energy particles
+  if (Math.random()<0.12) energyParticles.push(spawnParticle());
+  bgCtx.save();
+  for (let i=energyParticles.length-1; i>=0; i--) {
+    const p=energyParticles[i];
+    p.x+=p.vx; p.y+=p.vy; p.life-=p.decay;
+    if (p.life<=0||p.y<0) { energyParticles.splice(i,1); continue; }
+    const [r,g,b]=p.color;
+    bgCtx.beginPath();
+    bgCtx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);
+    bgCtx.fillStyle=`rgba(${r},${g},${b},${p.life*0.6})`;
+    bgCtx.shadowBlur=6;
+    bgCtx.shadowColor=`rgba(${r},${g},${b},0.8)`;
+    bgCtx.fill();
+  }
+  bgCtx.shadowBlur=0;
+  bgCtx.restore();
+
+  // galaxy smear
+  bgCtx.save();
+  bgCtx.globalAlpha=0.04;
+  const gx=bgCtx.createRadialGradient(150,300,0,150,300,120);
+  gx.addColorStop(0,'rgba(255,0,180,0.5)');
+  gx.addColorStop(0.5,'rgba(100,0,200,0.3)');
+  gx.addColorStop(1,'rgba(0,0,60,0)');
+  bgCtx.fillStyle=gx;
+  bgCtx.save();
+  bgCtx.translate(150,300);
+  bgCtx.rotate(Math.sin(ts*0.0001)*0.08);
+  bgCtx.scale(1,0.4);
+  bgCtx.beginPath();
+  bgCtx.arc(0,0,120,0,Math.PI*2);
+  bgCtx.fill();
+  bgCtx.restore();
+  bgCtx.restore();
+
+  // orbital traces around bumpers
+  orbitalAngle = ts*0.0008;
+  const bumpers = [{x:99,y:79,r:27},{x:197,y:79,r:27},{x:127,y:219,r:27},{x:217,y:219,r:27}];
+  bgCtx.save();
+  bgCtx.globalAlpha=0.18;
+  bumpers.forEach((b,bi) => {
+    const baseAngle = orbitalAngle + bi*1.1;
+    bgCtx.beginPath();
+    bgCtx.ellipse(b.x,b.y,b.r+7,b.r+7,0,0,Math.PI*2);
+    const col = bi%2===0 ? '255,0,200' : '64,224,255';
+    bgCtx.strokeStyle=`rgba(${col},0.5)`;
+    bgCtx.lineWidth=0.6;
+    bgCtx.stroke();
+    const dotX=b.x+Math.cos(baseAngle)*(b.r+7);
+    const dotY=b.y+Math.sin(baseAngle)*(b.r+7);
+    bgCtx.beginPath();
+    bgCtx.arc(dotX,dotY,2.5,0,Math.PI*2);
+    bgCtx.fillStyle=`rgba(${col},0.9)`;
+    bgCtx.globalAlpha=0.6;
+    bgCtx.shadowBlur=6;
+    bgCtx.shadowColor=`rgba(${col},1)`;
+    bgCtx.fill();
+    bgCtx.shadowBlur=0;
+    bgCtx.globalAlpha=0.18;
+  });
+  bgCtx.restore();
+
+  requestAnimationFrame(bgAnimate);
+}
+requestAnimationFrame(bgAnimate);
+
+// ======================== DMD CANVAS ========================
+const dmd = document.getElementById('dmdCanvas');
+const dctx = dmd.getContext('2d');
+// actual pixel resolution for dot matrix feel
+dmd.width = 296;
+dmd.height = 88;
+
+// DMD color palette
+const C_ORANGE  = '#ff8800';
+const C_AMBER   = '#ffcc00';
+const C_WHITE   = '#fff8f0';
+const C_DIM     = '#442200';
+const C_MAGENTA = '#ff00cc';
+const C_CYAN    = '#40e0ff';
+
+// ---- DMD State Machine ----
+const MODES = ['attract','score','multiball','jackpot','bonus','warpspeed','gameover'];
+let dmdMode = 'attract';
+let modeTimer = 0;
+let modeIndex = 0;
+
+// Score
+let displayScore = 0;
+let targetScore = 134700;
+let scoreDir = 1;
+
+// Scrolling text
+let scrollX = 296;
+const scrollMessages = [
+  'DEEP SPACE PINBALL',
+  'SHOOT THE WORMHOLE',
+  'MULTIBALL READY',
+  'WARP SPEED BONUS',
+  'HYPERSPACE JACKPOT',
+];
+let scrollMsgIndex = 0;
+let scrollMsg = scrollMessages[0];
+
+// Starfield on DMD
+const dmdStars = Array.from({length:50},()=>({
+  x:Math.random()*296, y:Math.random()*88,
+  speed:0.1+Math.random()*0.8, size:Math.random()<0.2?2:1,
+}));
+
+// Warp lines
+const warpLines = Array.from({length:8},(_,i)=>({
+  angle: (i/8)*Math.PI*2,
+  len: 0,
+  speed: 0.4+Math.random()*0.8,
+}));
+
+// Explosion particles for jackpot
+const dmdParticles = [];
+
+function dmdDrawDotGrid() {
+  // subtle dot grid
+  dctx.fillStyle='rgba(0,0,0,0.25)';
+  for(let y=1;y<88;y+=4) {
+    for(let x=1;x<296;x+=4) {
+      dctx.fillRect(x,y,1,1);
+    }
+  }
+}
+
+function dmdDrawText(text, x, y, size, color, shadow=null) {
+  if(shadow) {
+    dctx.shadowBlur=10;
+    dctx.shadowColor=shadow;
+  }
+  dctx.fillStyle=color;
+  dctx.font=`bold ${size}px 'Share Tech Mono', monospace`;
+  dctx.textAlign='center';
+  dctx.textBaseline='middle';
+  dctx.fillText(text,x,y);
+  dctx.shadowBlur=0;
+}
+
+function dmdDrawScore(score) {
+  const s = String(score).padStart(8,'0');
+  dctx.font = "bold 28px 'Share Tech Mono'";
+  dctx.textAlign='center';
+  dctx.textBaseline='middle';
+  // shadow
+  dctx.shadowBlur=16;
+  dctx.shadowColor=C_AMBER;
+  dctx.fillStyle=C_WHITE;
+  dctx.fillText(s, 148, 44);
+  dctx.shadowBlur=0;
+}
+
+function dmdDrawStars(ts) {
+  dmdStars.forEach(s=>{
+    s.x -= s.speed * (dmdMode==='warpspeed' ? 4 : 0.5);
+    if(s.x < 0) { s.x=296; s.y=Math.random()*88; }
+    const bright = dmdMode==='warpspeed' ? 1 : 0.4+Math.random()*0.3;
+    dctx.fillStyle=`rgba(255,240,220,${bright})`;
+    dctx.fillRect(Math.floor(s.x), Math.floor(s.y), s.size, s.size);
+  });
+}
+
+function dmdDrawWarpLines() {
+  const cx=148, cy=44;
+  warpLines.forEach(l=>{
+    l.len += l.speed * 4;
+    if(l.len > 200) l.len=0;
+    const x2=cx+Math.cos(l.angle)*l.len;
+    const y2=cy+Math.sin(l.angle)*l.len;
+    const alpha=Math.min(l.len/80,1);
+    const isMag = warpLines.indexOf(l)%2===0;
+    dctx.beginPath();
+    dctx.moveTo(cx,cy);
+    dctx.lineTo(x2,y2);
+    dctx.strokeStyle=isMag ? `rgba(255,0,200,${alpha*0.8})` : `rgba(64,224,255,${alpha*0.6})`;
+    dctx.lineWidth=1;
+    dctx.stroke();
+  });
+}
+
+function dmdDrawExplosion(ts) {
+  if(Math.random()<0.3) {
+    for(let i=0;i<3;i++) {
+      const angle=Math.random()*Math.PI*2;
+      const spd=0.5+Math.random()*2;
+      dmdParticles.push({
+        x:148,y:44,
+        vx:Math.cos(angle)*spd,
+        vy:Math.sin(angle)*spd,
+        life:1,
+        decay:0.02+Math.random()*0.04,
+        color:Math.random()<0.5?'255,0,200':'255,200,0',
+      });
+    }
+  }
+  for(let i=dmdParticles.length-1;i>=0;i--) {
+    const p=dmdParticles[i];
+    p.x+=p.vx; p.y+=p.vy; p.life-=p.decay;
+    if(p.life<=0){dmdParticles.splice(i,1);continue;}
+    dctx.fillStyle=`rgba(${p.color},${p.life})`;
+    dctx.fillRect(Math.floor(p.x),Math.floor(p.y),2,2);
+  }
+}
+
+// Blinking state
+let blinkOn = true;
+let lastBlink = 0;
+
+const callouts = [
+  { mode:'multiball', lines:['MULTI','BALL!'], colors:[C_MAGENTA,C_AMBER] },
+  { mode:'jackpot',   lines:['JACKPOT','!!!'],  colors:[C_AMBER,C_CYAN]  },
+  { mode:'bonus',     lines:['BONUS','X5'],     colors:[C_CYAN,C_AMBER]  },
+  { mode:'warpspeed', lines:['WARP','SPEED'],   colors:[C_CYAN,C_MAGENTA]},
+  { mode:'gameover',  lines:['GAME','OVER'],    colors:['#ff3300',C_DIM] },
+];
+
+const modeDurations = {attract:5000,score:4000,multiball:3000,jackpot:3000,bonus:3000,warpspeed:3500,gameover:3000};
+let lastModeSwitch=0;
+
+function dmdAnimate(ts) {
+  // Mode cycling
+  if(ts - lastModeSwitch > modeDurations[dmdMode]) {
+    lastModeSwitch=ts;
+    modeIndex=(modeIndex+1)%MODES.length;
+    dmdMode=MODES[modeIndex];
+    if(dmdMode==='attract') scrollX=296;
+    if(dmdMode==='gameover') { targetScore=0; }
+    else if(dmdMode==='score') { targetScore=134700+Math.floor(Math.random()*50000); }
+  }
+
+  // Score increment
+  if(displayScore < targetScore) displayScore = Math.min(displayScore+500,targetScore);
+  if(displayScore > targetScore) displayScore = Math.max(displayScore-500,targetScore);
+
+  // Blink
+  if(ts-lastBlink>500){blinkOn=!blinkOn;lastBlink=ts;}
+
+  // Clear
+  dctx.clearRect(0,0,296,88);
+
+  // BG
+  const bgGrad=dctx.createLinearGradient(0,0,0,88);
+  bgGrad.addColorStop(0,'rgba(8,0,15,1)');
+  bgGrad.addColorStop(1,'rgba(4,0,8,1)');
+  dctx.fillStyle=bgGrad;
+  dctx.fillRect(0,0,296,88);
+
+  // Background stars always
+  dmdDrawStars(ts);
+
+  if(dmdMode==='attract') {
+    // warp lines + scrolling title
+    dmdDrawWarpLines();
+    dctx.font="bold 22px 'Orbitron'";
+    dctx.textAlign='left';
+    dctx.textBaseline='middle';
+    dctx.shadowBlur=14;
+    dctx.shadowColor=C_MAGENTA;
+    dctx.fillStyle=C_MAGENTA;
+    dctx.fillText(scrollMsg, scrollX, 32);
+    dctx.shadowBlur=8;
+    dctx.shadowColor=C_CYAN;
+    dctx.fillStyle=C_CYAN;
+    dctx.font="10px 'Share Tech Mono'";
+    dctx.fillText('INSERT COIN   PRESS START', scrollX+10, 62);
+    dctx.shadowBlur=0;
+    scrollX -= 1.2;
+    const w = dctx.measureText(scrollMsg).width;
+    if(scrollX < -w-20) {
+      scrollX=296;
+      scrollMsgIndex=(scrollMsgIndex+1)%scrollMessages.length;
+      scrollMsg=scrollMessages[scrollMsgIndex];
+    }
+    // bottom bar
+    if(blinkOn) {
+      dctx.font="bold 9px 'Share Tech Mono'";
+      dctx.textAlign='center';
+      dctx.fillStyle='rgba(255,200,0,0.6)';
+      dctx.fillText('HIGH SCORE  00134700',148,78);
+    }
+
+  } else if(dmdMode==='score') {
+    // Score display with label
+    dctx.font="9px 'Share Tech Mono'";
+    dctx.textAlign='center';
+    dctx.fillStyle='rgba(255,140,0,0.6)';
+    dctx.fillText('PLAYER 1',74,14);
+    dctx.fillStyle='rgba(64,224,255,0.5)';
+    dctx.fillText('PLAYER 2',222,14);
+    dmdDrawScore(displayScore);
+    dctx.font="9px 'Share Tech Mono'";
+    dctx.textAlign='center';
+    dctx.fillStyle='rgba(255,140,0,0.4)';
+    dctx.fillText('BALL 1   3X MULTIPLIER',148,72);
+    // pulsing score glow
+    const pulse=0.5+0.5*Math.sin(ts*0.004);
+    dctx.strokeStyle=`rgba(255,200,0,${pulse*0.3})`;
+    dctx.lineWidth=1;
+    dctx.strokeRect(20,24,256,42);
+
+  } else if(dmdMode==='warpspeed') {
+    // Full warp: fast stars + big text
+    dmdDrawWarpLines();
+    dmdDrawWarpLines(); // draw twice = denser
+    const pulse=0.7+0.3*Math.sin(ts*0.01);
+    dctx.save();
+    dctx.translate(148,35);
+    dctx.scale(1+pulse*0.08,1+pulse*0.05);
+    dctx.shadowBlur=20;
+    dctx.shadowColor=C_CYAN;
+    dctx.fillStyle=C_CYAN;
+    dctx.font="bold 28px 'Orbitron'";
+    dctx.textAlign='center';
+    dctx.textBaseline='middle';
+    dctx.fillText('WARP',0,0);
+    dctx.restore();
+    dctx.shadowBlur=16;
+    dctx.shadowColor=C_MAGENTA;
+    dctx.fillStyle=C_MAGENTA;
+    dctx.font="bold 22px 'Orbitron'";
+    dctx.textAlign='center';
+    dctx.textBaseline='middle';
+    dctx.fillText('SPEED!',148,65);
+    dctx.shadowBlur=0;
+
+  } else {
+    // callout modes
+    const co = callouts.find(c=>c.mode===dmdMode) || callouts[0];
+    dmdDrawExplosion(ts);
+    const pulse=0.6+0.4*Math.sin(ts*0.008);
+    dctx.save();
+    dctx.translate(148,28);
+    dctx.scale(1+pulse*0.12,1+pulse*0.08);
+    dctx.shadowBlur=22;
+    dctx.shadowColor=co.colors[0];
+    dctx.fillStyle=co.colors[0];
+    dctx.font="bold 30px 'Orbitron'";
+    dctx.textAlign='center';
+    dctx.textBaseline='middle';
+    if(blinkOn || dmdMode==='gameover') dctx.fillText(co.lines[0],0,0);
+    dctx.restore();
+
+    dctx.shadowBlur=16;
+    dctx.shadowColor=co.colors[1];
+    dctx.fillStyle=co.colors[1];
+    dctx.font="bold 26px 'Orbitron'";
+    dctx.textAlign='center';
+    dctx.textBaseline='middle';
+    dctx.fillText(co.lines[1],148,64);
+    dctx.shadowBlur=0;
+
+    // bottom score
+    dctx.font="9px 'Share Tech Mono'";
+    dctx.fillStyle='rgba(255,200,0,0.5)';
+    dctx.textAlign='center';
+    dctx.fillText(String(displayScore).padStart(8,'0'),148,82);
+  }
+
+  // dot grid overlay
+  dmdDrawDotGrid();
+
+  requestAnimationFrame(dmdAnimate);
+}
+requestAnimationFrame(dmdAnimate);
+</script>
+</body>
+</html>
