@@ -773,8 +773,52 @@
     let particles = [];
     let dsParticles = [];  // Deep space style magenta/cyan burst particles
 
+    const PERF_HIGH = 2;
+    const PERF_MED = 1;
+    const PERF_LOW = 0;
+    let perfLevel = PERF_HIGH;
+    let fpsEma = 60;
+    let frameBudgetMs = 16.67;
+    const perfStats = { heavyFxMs: 0 };
+    let skipHeavyFxThisFrame = false;
+
+    function getPerfProfile() {
+        if (perfLevel === PERF_LOW) {
+            return {
+                particleSpawnScale: 0.45,
+                maxParticles: 160,
+                maxDsParticles: 90,
+                bumperRingSteps: 16,
+                pinShine: false,
+                dropTargetShine: false,
+                qualityStride: 2,
+            };
+        }
+        if (perfLevel === PERF_MED) {
+            return {
+                particleSpawnScale: 0.7,
+                maxParticles: 260,
+                maxDsParticles: 130,
+                bumperRingSteps: 28,
+                pinShine: false,
+                dropTargetShine: true,
+                qualityStride: 1,
+            };
+        }
+        return {
+            particleSpawnScale: 1,
+            maxParticles: 380,
+            maxDsParticles: 220,
+            bumperRingSteps: 48,
+            pinShine: true,
+            dropTargetShine: true,
+            qualityStride: 1,
+        };
+    }
+
     function createDsBurst(x, y, count, isMag) {
-        for (let i = 0; i < count; i++) {
+        const scaledCount = Math.max(1, Math.round(count * getPerfProfile().particleSpawnScale));
+        for (let i = 0; i < scaledCount; i++) {
             const angle = Math.random() * Math.PI * 2;
             const spd = 0.8 + Math.random() * 3.5;
             const useMag = isMag !== undefined ? isMag : Math.random() < 0.5;
@@ -1100,7 +1144,9 @@
     // === PARTICLES ===
     function createParticles(x, y, count) {
         const colors = ['#ff00ff', '#00ffff', '#ffff00', '#ff0000', '#00ff00', '#ff8800'];
-        for (let i = 0; i < count; i++) {
+        const profile = getPerfProfile();
+        const scaledCount = Math.max(1, Math.round(count * profile.particleSpawnScale));
+        for (let i = 0; i < scaledCount; i++) {
             particles.push({
                 x: x, y: y,
                 vx: (Math.random() - 0.5) * 5,
@@ -1114,8 +1160,9 @@
 
     function createFirework(x, y) {
         const colors = ['#ff00ff', '#00ffff', '#ffff00', '#ff0000', '#00ff00'];
-        for (let i = 0; i < 20; i++) {
-            const angle = (Math.PI * 2 * i) / 20;
+        const count = Math.max(8, Math.round(20 * getPerfProfile().particleSpawnScale));
+        for (let i = 0; i < count; i++) {
+            const angle = (Math.PI * 2 * i) / count;
             const speed = 1 + Math.random() * 2;
             particles.push({
                 x: x, y: y,
@@ -2833,6 +2880,8 @@
             }
         }
 
+        const profile = getPerfProfile();
+
         particles = particles.filter(p => {
             p.x += p.vx;
             p.y += p.vy;
@@ -2840,6 +2889,8 @@
             p.life--;
             return p.life > 0;
         });
+
+        if (particles.length > profile.maxParticles) particles.length = profile.maxParticles;
 
         dsParticles = dsParticles.filter(p => {
             p.x += p.vx;
@@ -2849,6 +2900,8 @@
             p.life -= p.decay;
             return p.life > 0;
         });
+
+        if (dsParticles.length > profile.maxDsParticles) dsParticles.length = profile.maxDsParticles;
 
         prevPlungeKey = keys.c;
 
@@ -3822,6 +3875,7 @@
     })();
 
     function drawAnimatedGrid() {
+        const profile = getPerfProfile();
         const time = performance.now();
         const t = time * 0.001;
 
@@ -3864,9 +3918,10 @@
         ctx.fillRect(0, 0, TABLE_WIDTH, TABLE_HEIGHT);
 
         // ── 3. WARP TUNNEL RINGS ─────────────────────────────────────
-        const cx = TABLE_WIDTH / 2, cy = TABLE_HEIGHT * 0.32;
-        ctx.save();
-        for (let ring = 0; ring < 8; ring++) {
+        if (!skipHeavyFxThisFrame) {
+            const cx = TABLE_WIDTH / 2, cy = TABLE_HEIGHT * 0.32;
+            ctx.save();
+            for (let ring = 0; ring < 8; ring++) {
             const rt = (time * 0.0003 + ring * 0.15) % 1;
             const eased = rt * rt;
             const rr = eased * TABLE_WIDTH * 0.88;
@@ -3878,8 +3933,9 @@
             ctx.strokeStyle = `rgba(${col},1)`;
             ctx.lineWidth = 0.8;
             ctx.stroke();
+            }
+            ctx.restore();
         }
-        ctx.restore();
 
         // ── 4. GALAXY SMEAR ──────────────────────────────────────────
         ctx.save();
@@ -3909,7 +3965,7 @@
         }
 
         // ── 6. SHOOTING STARS ────────────────────────────────────────
-        if (Math.random() < 0.018) pf.shootingStars.push(pf.spawnShootingStar());
+        if (Math.random() < 0.018 * profile.particleSpawnScale) pf.shootingStars.push(pf.spawnShootingStar());
         ctx.save();
         for (let i = pf.shootingStars.length - 1; i >= 0; i--) {
             const s = pf.shootingStars[i];
@@ -3939,7 +3995,7 @@
         ctx.restore();
 
         // ── 7. ENERGY PARTICLES (rising from drain) ──────────────────
-        if (Math.random() < 0.10) pf.energyParticles.push(pf.spawnEnergyParticle());
+        if (Math.random() < 0.10 * profile.particleSpawnScale) pf.energyParticles.push(pf.spawnEnergyParticle());
         ctx.save();
         for (let i = pf.energyParticles.length - 1; i >= 0; i--) {
             const p = pf.energyParticles[i];
@@ -3987,8 +4043,8 @@
         ctx.restore();
 
         // ── 9. WARP GRID LINES ────────────────────────────────────────
-        const gridSize = 25;
-        for (let x = 0; x <= TABLE_WIDTH; x += gridSize) {
+        const gridSize = profile.qualityStride > 1 ? 40 : 25;
+        for (let x = 0; x <= TABLE_WIDTH; x += gridSize * profile.qualityStride) {
             const phase = (x / TABLE_WIDTH + t * 0.3) % 1;
             const brightness = 0.022 + 0.014 * Math.sin(phase * Math.PI * 2);
             ctx.strokeStyle = `rgba(255,0,200,${brightness})`;
@@ -3999,7 +4055,7 @@
             ctx.stroke();
         }
         const gridOff = (t * 18) % gridSize;
-        for (let y = 0; y <= TABLE_HEIGHT; y += gridSize) {
+        for (let y = 0; y <= TABLE_HEIGHT; y += gridSize * profile.qualityStride) {
             const ay = (y + gridOff) % TABLE_HEIGHT;
             const gi = 0.022 + 0.028 * Math.pow(Math.sin((1 - ay / TABLE_HEIGHT) * Math.PI), 2);
             ctx.strokeStyle = `rgba(64,224,255,${gi})`;
@@ -4011,7 +4067,7 @@
         }
 
         // ── 9b. HEX GRID OVERLAY (subtle, drifts slowly) ────────────────
-        {
+        if (!skipHeavyFxThisFrame) {
             const hexSize = 18;
             const hexW = hexSize * Math.sqrt(3);
             const hexH = hexSize * 2;
@@ -4040,7 +4096,7 @@
         }
 
         // ── 9c. PERSPECTIVE VANISHING-POINT GRID (radiates from bottom centre) ─
-        {
+        if (!skipHeavyFxThisFrame) {
             const vpx = TABLE_WIDTH / 2, vpy = TABLE_HEIGHT + 40;
             const numRays = 14;
             ctx.save();
@@ -4079,7 +4135,7 @@
         }
 
         // ── 9d. DATA STREAM COLUMNS (magenta/cyan vertical light shafts) ──────
-        {
+        if (!skipHeavyFxThisFrame) {
             const streams = [
                 { x: TABLE_WIDTH * 0.22, color: '255,0,200',  speed: 1.4, offset: 0.0  },
                 { x: TABLE_WIDTH * 0.38, color: '64,224,255', speed: 1.9, offset: 0.4  },
@@ -4150,7 +4206,7 @@
         ctx.save();
         ctx.translate(x, y);
         const spinSpeed = isActive ? t * 3 : t;
-        const ringSteps = 48;
+        const ringSteps = getPerfProfile().bumperRingSteps;
         const stepAngle = (Math.PI * 2) / ringSteps;
         // Colour stops around the ring: magenta → cyan → violet → magenta
         const hueStops = [
@@ -4713,7 +4769,7 @@
         ctx.restore();
 
         // Rotating shine (lit only)
-        if (isLit && radius >= 4) {
+        if (isLit && radius >= 4 && getPerfProfile().pinShine) {
             const shineAngle = (t * 1.8 + x * 0.03 + y * 0.02) % (Math.PI*2);
             const sx = x + Math.cos(shineAngle) * radius * 0.45;
             const sy = y + Math.sin(shineAngle) * radius * 0.45;
@@ -4812,20 +4868,21 @@
         ctx.restore();
 
         // 5. Rotating shine sweep
-        const shineFrac = (t * 1.2 + x * 0.01 + y * 0.008) % 1;
-        const shineAngle = shineFrac * Math.PI * 2;
-        ctx.save();
-        ctx.clip(new Path2D());
-        ctx.beginPath(); ctx.arc(x, y, radius*0.88, 0, Math.PI*2);
-        ctx.clip();
-        const sx = x + Math.cos(shineAngle) * radius * 0.6;
-        const sy = y + Math.sin(shineAngle) * radius * 0.6;
-        const sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius*0.55);
-        sg.addColorStop(0,   'rgba(255,255,255,0.55)');
-        sg.addColorStop(0.5, 'rgba(255,255,255,0.12)');
-        sg.addColorStop(1,   'transparent');
-        ctx.fillStyle = sg; ctx.fillRect(x-radius, y-radius, radius*2, radius*2);
-        ctx.restore();
+        if (getPerfProfile().dropTargetShine) {
+            const shineFrac = (t * 1.2 + x * 0.01 + y * 0.008) % 1;
+            const shineAngle = shineFrac * Math.PI * 2;
+            ctx.save();
+            ctx.beginPath(); ctx.arc(x, y, radius*0.88, 0, Math.PI*2);
+            ctx.clip();
+            const sx = x + Math.cos(shineAngle) * radius * 0.6;
+            const sy = y + Math.sin(shineAngle) * radius * 0.6;
+            const sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius*0.55);
+            sg.addColorStop(0,   'rgba(255,255,255,0.55)');
+            sg.addColorStop(0.5, 'rgba(255,255,255,0.12)');
+            sg.addColorStop(1,   'transparent');
+            ctx.fillStyle = sg; ctx.fillRect(x-radius, y-radius, radius*2, radius*2);
+            ctx.restore();
+        }
     }
 
     // =====================================================
@@ -5153,7 +5210,9 @@
         ctx.scale(scale, scale);
 
         // Animated glowing grid background
+        const heavyStart = performance.now();
         drawAnimatedGrid();
+        perfStats.heavyFxMs = performance.now() - heavyStart;
 
         // DMD panel drawn MID-PLAYFIELD, behind everything (ball goes over the top)
         drawDMDOnCanvas();
@@ -5866,6 +5925,14 @@
             }
             updateMenuState();
         }
+
+        frameBudgetMs = deltaTime > 0 ? deltaTime : frameBudgetMs;
+        fpsEma = fpsEma * 0.92 + ((deltaTime > 0 ? 1000 / deltaTime : 60) * 0.08);
+
+        if (fpsEma < 46 || perfStats.heavyFxMs > frameBudgetMs * 0.55) perfLevel = Math.max(PERF_LOW, perfLevel - 1);
+        else if (fpsEma > 56 && perfStats.heavyFxMs < frameBudgetMs * 0.35) perfLevel = Math.min(PERF_HIGH, perfLevel + 1);
+
+        skipHeavyFxThisFrame = perfLevel === PERF_LOW;
 
         draw();
         requestAnimationFrame(gameLoop);
